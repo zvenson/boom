@@ -1,0 +1,120 @@
+<!-- BOOM cheat sheet: an HTML fragment the emulator shows right of the device (tools/build.sh copies it to
+     runtime/web/firmware/boom.cheat.html). The controls are OberVave 3.9's, key for key. -->
+<h2>BOOM FM <small>0.30 · mini DAW on the VIBE · 8 tracks A–H</small></h2>
+<p class="dim">8 synth drums · playable 808 bass · 4-op FM keys · OberVave's sequencer, mixer, FX and audio tracks · HOME = what every control does right now</p>
+
+<h3>Tracks = kinds of sound <small class="dim">(TYPE, SOUND's last page – per track and pattern)</small></h3>
+<table>
+  <tr><td><span class="k" style="background:#60B0FF;color:#111">A DRUMS</span></td><td>a <b>kit</b> of 8 drums: KICK SNARE CLAP CH OH RIM SNAP PERC – pads 9–16 and the keys play them (GM notes over MIDI) · the closed hat chokes the open one · encoder B = the kit</td></tr>
+  <tr><td><span class="k" style="background:#FF9628;color:#111">B BASS</span></td><td>the <b>808</b>: played like a bass over the keys – mono, PUNCH (pitch drop), CLICK, SUB, TONE, DRIVE soft / hard / fold, DECAY or GATE, <b>SLIDE</b> legato (overlapping notes glide) or always</td></tr>
+  <tr><td><span class="k" style="background:#6EDC96;color:#111">C D MEL</span></td><td><b>4-op FM</b>: 8 algorithms, feedback on op 4, 8 voices, filter + envelopes, LFO, arp – bells, plucks, keys, pads</td></tr>
+  <tr><td><span class="k" style="background:#FF2E97;color:#111">OBERVAVE</span></td><td>the analog poly: its 64 sounds and pages (OSC 1/2, VOICE, OSC MOD, FILTER)</td></tr>
+  <tr><td><span class="k" style="background:#FF2E97;color:#111">REAL KIT</span></td><td>DRUMS, sounds 9–12: an <b>acoustic kit</b> (samples) – rows <b>KICK · SNARE · TOM HI · HAT · OPEN · TOM LO · RIDE · CRASH</b>; each drum's TUNE (64 = as recorded) and DECAY (127 = the whole hit), soft hits are duller · KIT page, knob 4 <b>DRUMS: SYNTH / ACOUSTIC / HIP HOP</b> switches any kit · <b>HIP HOP</b> (programs 13–16: NY KIT, BOOM BAP, NY DUSTY, NY HEAVY): KICK · SNARE · SNARE 2 · HAT · OPEN · RIM · KICK 2 · CRASH, the same drums tuned down, compressed and on an SP-1200 grid · the drums: Virtuosity Drums by Versilian Studios, CC0</td></tr>
+  <tr><td><span class="k" style="background:#2BFFB4;color:#111">PIANO ROLL</span></td><td>STEPS on a track that is no kit: <b>12 pitches x 16 steps</b>. <b>Knob 2 or a key picks the row</b> (the pitch) · <b>a pad sets that pitch on its step</b>, a tap on a note <b>takes that one note away</b> (the step's other notes stay) · <b>a key played writes its note at the cursor</b> (added to what is there), the cursor goes on · EDIT clears the row's note at the cursor · <b>ENTER: FOLD</b> – only the pitches the track uses (and the chosen one) as rows, so the whole part is in view; again: all keys · marks at the edge: notes above / below the window</td></tr>
+  <tr><td><span class="k">DRUM GRID</span></td><td><b>A drum played writes itself at the cursor</b> (a key, MIDI, or <b>SHIFT + K1–K6 = the kit's first six drums</b>), the cursor goes on · a pad sets or removes the chosen row's drum on its step</td></tr>
+  <tr><td><span class="k">MOUSE</span></td><td>In the plugin and the browser: <b>click a cell in STEPS</b> – that note or drum on that step goes on or off and sounds</td></tr>
+  <tr><td><span class="k" style="background:#FFE14D;color:#111">DX</span></td><td>a <b>DX7 voice</b> (6 operators, 32 algorithms) under four macros: <b>BRIGHT · ATTACK · DECAY · RELEASE</b> · TONE: ALGO, FEEDBACK (VOICE = as the sound has it) · FILTER · VOICE · slots 129–160 (encoder B): 20 factory sounds · F3 LOAD → <b>DX BANK</b>: a .syx bank from VIBE FM/boom/ puts its 32 sounds into those slots</td></tr>
+  <tr><td><span class="k" style="background:#2BFFB4;color:#111">STRINGS</span></td><td>a <b>string ensemble</b> (8 voices), sounds 161–176: PERFORM <b>ENSEMBLE · CUTOFF · ATTACK · RELEASE</b> · REGISTERS: <b>16' · 8' · 4'</b> · FILTER · VOICE – ENSEMBLE at 0 is the dry saws, full is the three swaying lines only</td></tr>
+  <tr><td><span class="k" style="background:#FFE14D;color:#111">SAMPLER</span></td><td>sounds 177–184, as ZVAMPLER · <b>EDIT</b>: the sample big, START green, END red (turning one zooms to it) · knobs START END PITCH FINE · <b>F1 LOAD</b> a WAV onto the track · <b>F2</b> the input REC takes (IN 1 / IN 2 / RESAMPLE) · <b>F3</b> 1-SHOT / GATE / LOOP · <b>F4</b> FWD / REV · <b>F5 KEYS</b>: MEL (the sample in tune, C3 = as recorded) or CHOP (C3 = slice 1) · <b>REC</b> on the track: records from the next bar until REC again · <b>CHOP</b>: the slices in order – keys from C3, <b>pads row 3 = slices 1–4, row 4 = 5–8</b>, SHIFT + K1–K6 = 1–6 (no scale, no octave) · knob 3 <b>SLICES: how many</b> · play a slice or knob 1: <b>the cut</b> · knob 2 <b>MOVES it</b> (SHIFT fine; cut 1 = START) · F1 ADD CUT · F2 DEL CUT · F3 EVEN again · F4 HITS: the cuts onto the hits · SOUND: QUALITY (CLEAN, SP 12, MPC, LO-FI), ATTACK, RELEASE, VOLUME</td></tr>
+  <tr><td><span class="k">AUDIO</span></td><td>any track, as in OberVave: IN 1 / IN 2 / RESAMPLE, takes per pattern, CUT, WAVs</td></tr>
+</table>
+
+<h3>Colour keys = sound &amp; sequencer</h3>
+<table>
+  <tr><td><span class="k c" style="background:#B38CFF">SOUND</span></td><td>DRUMS: PERFORM · KICK · SNARE · CLAP · HATS · RIM/SNAP · PERC · KIT · <b>TYPE</b> &nbsp;·&nbsp; BASS: PERFORM · BODY · PUNCH · GLIDE · DRIVE · FILTER · TYPE &nbsp;·&nbsp; MEL: PERFORM · ALGO · OP 1–4 · FILTER · VOICE · TYPE · an audio track: AUDIO · TAKE · FILTER · TYPE · <span class="dim">in STEPS: clear the step</span></td></tr>
+  <tr><td><span class="k c" style="background:#F5C93F">ENV</span></td><td>DRUMS: the 8 drums' <b>LEVELS</b> (2 pages) · BASS / MEL: filter envelope · amp envelope</td></tr>
+  <tr><td><span class="k c" style="background:#6EE7A8">LFO</span></td><td>Shape, rate, delay, phase · destinations pitch / filter / amp (BASS: wobble, MEL: vibrato)</td></tr>
+  <tr><td><span class="k c" style="background:#FF6A1A">ARP</span></td><td>Mode · division · octaves · gate (again: HOLD)</td></tr>
+  <tr><td><span class="k c" style="background:#3FA9F5">FX</span></td><td>Chorus · <b>Delay</b> (MODE <b>ANALOG · DIGITAL · TAPE</b>, time, feedback, tone) · <b>Reverb</b> (MODE <b>HALL · ROOM · PLATE</b>, size, damp, pre-delay) · Drive (TYPE OVERDRV · DIST · FUZZ · CRUSH, or <b>AMP</b>: a tube amp as an <b>insert</b> – turning it on puts the chosen track through its own amp, knob 4 (or the mixer's DRIVE row) sets how much of a track; GAIN, TONE) (again: next one) – delay and reverb return full: the mixer's sends set how much</td></tr>
+  <tr><td><span class="k c" style="background:#FF5A8A">SEQ</span></td><td>Again and again: <b>TRACKS → STEPS → TRACK → PATTERNS</b> · DRUMS in STEPS: the <b>drum grid</b> – a row a drum; encoder 2 (or a key) picks the row, the 16 pads are <b>that drum's steps</b>, encoder 3 its velocity, encoder 4 its <b>ROLL</b> (2 3 4 6 8 hits), SOUND clears that drum on the step · an audio track: STEPS = <b>CUT</b></td></tr>
+</table>
+<p class="dim">Encoders 1–4 = the four values shown above F1–F6.</p>
+
+<h3>F keys</h3>
+<table>
+  <tr><td><span class="k">F1</span></td><td><b>MIXER</b> · again: LEVEL → <b>FX</b> (the sum: FILTER · CRUSH · DUB · REPEAT) → PAN → DELAY → REVERB → CHORUS → DRIVE → <b>MASTER</b> (volume, DJ filter, drive, comp)</td></tr>
+  <tr><td><span class="k">F2</span></td><td><b>TRACKS</b>: four tracks at a time, encoder A scrolls through A–H</td></tr>
+  <tr><td><span class="k">F3 F4</span></td><td><b>LOAD</b> · <b>SAVE</b> – PRESET / PATTERN / AUDIO / SONG (ALL), see FILES · again: the next kind</td></tr>
+  <tr><td><span class="k">SHIFT + F3 F4</span></td><td><b>OCT − / +</b> – the octave of the keys and of a MIDI keyboard on the main channel (the VIBE Box has no OCT buttons), −3 … +3</td></tr>
+  <tr><td><span class="k">F5</span></td><td><b>STORE</b> the sound in a program slot (DATA picks it, F5 again) · <span class="dim">SHIFT: HOLD a colour key</span></td></tr>
+  <tr><td><span class="k">F6</span></td><td><b>GLOBAL</b> → OUTPUT → <b>SCALE</b> · GLOBAL: tempo (each pattern its own), click, MIDI, <b>METER</b> of the chosen track (4/4 3/4 2/4 5/4 7/4 6/8 5/8 7/8 9/8 12/8: its STEPS pages and LENGTH in its bars; track A's is the song's: click, count-in, the downbeat), SHIFT + 4: tune · ENTER: sync · DATA: <b>MIDI OUT</b> · <span class="dim">SHIFT: UNDO</span></td></tr>
+  <tr><td><span class="k">SHIFT + K1–K6<br>(↩: locked)</span></td><td><b>Play without a keyboard:</b> the scale's first six notes from the key (PLAY CHORDS: the six chords of the key, I ii iii IV V vi in major) · F6 → SCALE: KEY, SCALE (major, minor, dorian, phrygian, mixolydian, harmonic minor, penta major / minor, blues), PLAY, PADS (pads 9–16 in the scale, or the white keys) · OCT − / + shifts them</td></tr>
+  <tr><td><span class="k">RESET</span></td><td>GLOBAL, SHIFT+ENTER → RESET ALL? → ENTER: everything saved back to factory</td></tr>
+</table>
+
+<h3>MIDI tracks <small class="dim">(0.30 – an external synth: only out, nothing sounds in BOOM)</small></h3>
+<table>
+  <tr><td><span class="k">TYPE</span></td><td>SOUND ▸ TYPE: <b>MIDI</b> (slots 185–192: MIDI CH 1–8) · the steps, the keys, MIDI IN, the ARP and REC work as on any track – the notes go out</td></tr>
+  <tr><td><span class="k">MIDI</span></td><td><b>CHANNEL</b> 1–16 · <b>PROGRAM</b> NONE / 1–128 (sent once the knob rests, and when the track becomes MIDI) · <b>VELOCITY</b> AS PLAYED / fixed</td></tr>
+  <tr><td><span class="k">PERFORM</span></td><td>four knobs = four <b>CCs</b> (sent when they change: a knob, automation, a sound loaded) · <b>CC NUMBERS</b>: which CC each one is (default 74 · 71 · 73 · 1)</td></tr>
+  <tr><td><span class="k">OUT</span></td><td>to every USB-MIDI device at the VIBE and to the computer · CLOCK and START/STOP go out while a MIDI track exists (GLOBAL MIDI OUT can stay off) · a note's OFF goes to the channel it started on</td></tr>
+</table>
+
+<h3>Audio tracks <small class="dim">(on the VIBE: the inputs IN 1 / IN 2 – with an interface like the XR18: IN 1 … IN 16)</small></h3>
+<table>
+  <tr><td><span class="k">TYPE</span></td><td>SOUND, last page: <b>SYNTH / AUDIO</b> – per pattern: each pattern its own audio tracks and takes, they change with it on the bar</td></tr>
+  <tr><td><span class="k">AUDIO</span></td><td>SOURCE <b>IN 1 … IN 16</b> (as many as the interface has; stereo: the pairs IN 1+2, 3+4 …) · <b>RESAMPLE</b> (what you hear) · CHANNELS mono / stereo · <b>GAIN</b> +0…40 dB (IN 1 / IN 2 only) (the input bar top right: red = clipping) · MONITOR</td></tr>
+  <tr><td><span class="k">TAKE</span></td><td>BARS (FREE: as long as recorded) · <b>LOOP</b> / <b>ONCE</b> (once from the pattern's start) · REC <b>NEW</b> / <b>DUB</b> (overdub) · INPUT line / mic / hi-z</td></tr>
+  <tr><td><span class="k">FILTER</span></td><td>OFF / LP / HP / BP · CUTOFF · RESO · DRIVE · <span class="dim">in the sequencer: CUTOFF</span></td></tr>
+  <tr><td><span class="k c" style="background:#FF2E5A">ARM</span></td><td><b>Hold REC + push knob 1–4</b> (tracks A–D, or E–H in that window) · <b>hold REC + ENTER</b>: the chosen track · <b>hold REC + a pad of row 1</b> – that audio track ARMED or not (any page, several at once) · armed: its letter <b>white on red</b> in the header, <b>ARM · IN n</b> and the input's level in TRACKS, a red frame in its view · REC then records <b>all armed tracks at once</b>, each its own take, from the same frame – multitrack</td></tr>
+  <tr><td><span class="k">REC</span></td><td>Stopped: armed, <b>PLAY</b> records from bar 1 · playing: from the next bar · REC again: stop (all) · held and let go: clear the take (not after arming) · nothing armed: the chosen audio track</td></tr>
+  <tr><td><span class="k">CUT</span></td><td>FROM · TO (a detent = 1/16, fast = a bar, <b>SHIFT = 1 ms</b>) · ERASE / DELETE / CROP · DO: turn twice</td></tr>
+  <tr><td><span class="k">START END</span></td><td>An audio track's TRACK view (BARS · MODE · START · END): the loop plays only START to END of the take (bar.beat.sixteenth+ms, END exclusive), free: turned slowly each detent goes to the next rising zero crossing (no click at the seam), faster in bigger steps, SHIFT: a frame – nothing is cut</td></tr>
+</table>
+
+<h3>FILES <small class="dim">(F3 LOAD · F4 SAVE, encoder 1 the kind, ENTER does it; all in VIBE FM/boom/ on the card)</small></h3>
+<p><b>PRESET</b> one sound (.obp) – SAVE: the track's sound with a name (encoder 2 place, 3 letter) · LOAD: into the track, edited (F5 STORE keeps it in a slot) ·
+<b>PATTERN</b> (.obt) the pattern with its sounds, mixer and audio tracks, the takes as WAVs beside it – LOAD (ENTER twice; <b>encoder 3: which pattern</b>, the one you are on only stopped) replaces that pattern, its audio follows ·
+<b>AUDIO</b> – SAVE: the track's take as a WAV · LOAD: <b>IN MEMORY</b> a take another pattern plays (the same take in several patterns) or any WAV from card or USB stick (16/24 bit, float; other rates converted) – <b>encoder 3 / 4: into which pattern and track</b> ·
+<b>SONG (ALL)</b> (.obv) all 64 patterns, sounds, mixers, settings and audio – LOAD replaces everything (ENTER twice) · <b>NEW SONG</b> (first in the list, ENTER twice) empties every pattern and its audio; settings and programs stay</p>
+
+<h3>Encoders A · B · DATA</h3>
+<table>
+  <tr><td><span class="k">A</span></td><td>Track A–H – everywhere · <b>SHIFT + A: tempo</b></td></tr>
+  <tr><td><span class="k">B</span></td><td>Sound (preset) of the track – everywhere · <span class="dim">STEPS: the note is encoder 2, TRACK: transpose encoder 4</span></td></tr>
+  <tr><td><span class="k">DATA</span></td><td>Pattern – everywhere (playing: on the bar) · GLOBAL: MIDI OUT · <span class="dim">STEPS: the step is encoder 1, PATTERNS: the slot encoder 1</span> · <span class="dim">SHIFT + DATA: a frame over F1–F6, press = that key · tempo: SHIFT + A (or GLOBAL, encoder 1)</span></td></tr>
+</table>
+
+<h3>Pads · columns = the four tracks in view</h3>
+<div class="pads">
+  <div style="--c:#60B0FF">START / STOP<small>A</small></div>
+  <div style="--c:#FF9628">START / STOP<small>B</small></div>
+  <div style="--c:#6EDC96">START / STOP<small>C</small></div>
+  <div style="--c:#FF6096">START / STOP<small>D</small></div>
+  <div style="--c:#60B0FF">SELECT<small>A</small></div>
+  <div style="--c:#FF9628">SELECT<small>B</small></div>
+  <div style="--c:#6EDC96">SELECT<small>C</small></div>
+  <div style="--c:#FF6096">SELECT<small>D</small></div>
+  <div style="--c:#8A93A6">NOTES<small>row 3 · DRUMS: KICK SNARE CLAP RIM</small></div>
+  <div style="--c:#8A93A6">NOTES<small></small></div>
+  <div style="--c:#8A93A6">NOTES<small></small></div>
+  <div style="--c:#8A93A6">NOTES<small></small></div>
+  <div style="--c:#8A93A6">NOTES<small>row 4 · DRUMS: CH OH SNAP PERC</small></div>
+  <div style="--c:#8A93A6">NOTES<small></small></div>
+  <div style="--c:#8A93A6">NOTES<small></small></div>
+  <div style="--c:#8A93A6">NOTES<small></small></div>
+</div>
+<p class="dim">Start / stop waits for the next bar (blinks) · REC lit: row 1 records instead<br>
+TRACKS: rows 3–4 = rows 1–2 (either MPK bank) · MIXER: rows 2–3 <b>mute</b>, SHIFT+pad <b>solo</b>, row 4 select · SEQ: pads = the 16 steps</p>
+
+<h3>In the DAW <small class="dim">(VIBE FM VST 0.9)</small></h3>
+<table>
+  <tr><td><span class="k">MIDI</span></td><td>GLOBAL, knob 3 <b>MIDI CH: AUTO</b> – in a DAW the channels <b>1–8 play the tracks A–H</b>, whichever is chosen on the panel (on the VIBE: every channel plays the chosen track) · OMNI or a fixed first channel as before · <b>channel 16</b>: a note from C1 starts that pattern on the bar (C1 = pattern 1), a program change too</td></tr>
+  <tr><td><span class="k">TYPE</span></td><td>SOUND → TYPE: knob 2 <b>PLAYS</b> – <b>SEQ</b> the track's own steps, <b>DAW</b> only what the DAW sends on its channel (its steps are silent) · knob 3 <b>OUT</b> – MAIN or the track's <b>own output</b>: A = OUT 3/4, B = 5/6 … G = 15/16 ("Track A" … "Track G" in the DAW; H stays in the main mix; a "?" = this host has no such output, the track stays in the main mix) · knob 4 <b>MIDI IN</b> – SELECTED (plays MIDI only while chosen) or <b>CH 1–16</b>: always answers that channel, chosen or not</td></tr>
+  <tr><td><span class="k">EXPORT</span></td><td>F4 SAVE → <b>MIDI</b>: the pattern as a MIDI file (a track each, channels 1–8, with swing, ties, ratchets) in <b>VIBE FM/boom/</b> – drag it into the DAW from that folder</td></tr>
+  <tr><td><span class="k">AUTOMATE</span></td><td>Master Filter, Crush, Dub, Repeat · Pattern · A–H Plays · the mixer · the sounds</td></tr>
+  <tr><td><span class="k">PROJECT</span></td><td>The DAW project holds every pattern, sound and mixer · files are versioned: a newer BOOM reads an older project</td></tr>
+</table>
+
+<h3>FOCUS · one knob, one button</h3>
+<p><b>Hold ENTER</b> (or the DATA wheel) 0.6 s: an orange frame walks over the area, track, sound, the four values and F1–F6 with <b>DATA</b> · <b>ENTER</b> uses it (a value: DATA changes, ENTER ends) · hold again or ↩: off. A short ENTER stays BOOM's.</p>
+
+<h3>Transport</h3>
+<table>
+  <tr><td><span class="k">PLAY</span></td><td>Start from step 1 / stop · <kbd>Space</kbd></td></tr>
+  <tr><td><span class="k">REC</span></td><td>Record on / off · hold 1 s or <b>SHIFT+REC</b>: clear the track · <kbd>O</kbd></td></tr>
+  <tr><td><span class="k">HOME</span> / <span class="k">MENU</span></td><td>Overview of every control · hold SHIFT: 2nd layer</td></tr>
+  <tr><td><span class="k">↩</span></td><td>Tap: <b>K LOCK</b> – K1–K6 play the scale's notes as with SHIFT held, until tapped again (lit in the track's colour; PERFORM: SOUND) · <b>hold + encoder 1: UNDO</b> (left back, right forward, 16 steps) · hold 2 s: one step back</td></tr>
+  <tr><td><span class="k">HOME</span> 1 s</td><td>All firmwares (also SHIFT+HOME)</td></tr>
+</table>
+<p class="dim">64 patterns (PATTERNS: 8 a page, encoder 1 fast = a page) · edits are kept when you switch while playing and saved at the next stop · programs 65–70: KICK, SNARE, HIHAT, CLAP, E-PIANO, WURLI · QUANT (TRACKS, encoder 4) per track, OFF = as played</p>

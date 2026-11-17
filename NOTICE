@@ -1,0 +1,20 @@
+BOOM FM
+Copyright (C) 2026 Sven Trogus (zvenson) – GPL-3.0 with an attribution term, see COPYRIGHT.
+
+This program contains parts from others:
+
+1. DX7 voice engine (dx7_core.h, dx7_tables.h)
+   A C port of the "msfa" synthesis engine from Dexed (https://github.com/asb2m10/dexed).
+   Copyright 2012 Google Inc.; Copyright 2016-2025 Pascal Gauthier.
+   Licensed under the Apache License, Version 2.0 (see LICENSE-APACHE-2.0).
+   Changes: ported to C, integer only, one LFO per note, no portamento / MTS / pitch bend;
+   port and integration Copyright (C) 2026 Sven Trogus, GPL-3.0.
+
+2. Acoustic and hip hop drum kits (bm_realkit.h, bm_hiphop.h)
+   Made from "Virtuosity Drums" by Versilian Studios
+   (https://github.com/sfzinstruments/virtuosity_drums), CC0-1.0 (public domain dedication).
+   Mixed, tuned, compressed and resampled for BOOM FM.
+
+Product names such as 808, DX7, MPC or SP-1200 are trademarks of their owners and are used only
+to describe a kind of sound. BOOM FM is not affiliated with them. "VIBE FM" is a trademark of
+Sven Trogus.
