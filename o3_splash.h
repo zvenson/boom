@@ -18,7 +18,7 @@ static void splash_draw(uint16_t *fb)
     static const uint16_t STRIKE[10] = {0, 120, 30, 0, 220, 80, 40, 256, 200, 256};   /* per 40 ms: two flashes, then it holds */
     uint32_t k = o3_ms / 40u, fade = k < 10u ? STRIKE[k] : 256u;
     const uint16_t bg = 0x0824;
-    vg_clear(0x0E0624);
+    vg_clear(0x000000);
     for (uint32_t y = 0; y < BSPL_H; y++) {
         uint16_t *p = fb + (25u + y) * VIBE_SCREEN_W; const uint16_t *s = bspl_px + y * BSPL_W;
         if (fade >= 256u) for (uint32_t x = 0; x < BSPL_W; x++) p[x] = s[x];

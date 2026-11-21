@@ -32,11 +32,44 @@ static const char *mi_label(uint32_t p, const uint8_t *pv)   /* (0.30) a MIDI tr
     scat(s, "CC "); fmt_u(s + 3, mi_ccn(pv[P_MI_CC1N + (p - P_MI_CC1)]));
     return s;
 }
+static const char *ep_label(uint32_t p, const uint8_t *pv)   /* (0.31) an E-PIANO's knobs on the drums' bytes */
+{
+    const int reed = pv[P_EP_MODEL] & 1u;
+    switch (p) {
+    case P_EP_MODEL: return "MODEL"; case P_EP_TONE: return "TONE"; case P_EP_BARK: return "BARK"; case P_EP_BELL: return reed ? "BITE" : "BELL";
+    case P_EP_DECAY: return "DECAY"; case P_EP_TREM: return "TREMOLO"; case P_EP_RATE: return "RATE"; case P_EP_DRIVE: return "PREAMP";
+    case P_EP_NOISE: return "HAMMER"; case P_EP_VELO: return "TOUCH"; case P_EP_STEREO: return "STEREO"; case P_AR: return "DAMPER";
+    default: return 0;
+    }
+}
 static const page_t *PG(uint32_t pg)            /* the page's table row: SOUND's and ENV's by the track's kind */
 {
     if (pg <= PG_AENV) { uint32_t ty = trk_type(sel); return &SPAGE[ty == T_DRUMS && live_p[sel].v[P_KIT_SRC] ? NTYPE : ty][pg]; }   /* (0.13: the acoustic kit has its own pages) */
     return &PAGE[pg % NPAGE];
 }
+/* (0.31, Sven: "4 Parameter je Drum, aber keine Lautstärke") SHIFT held on a drum page: the knobs of the drums ON that page
+ * become their LEVELS (the same as ENV's LEVELS pages): KICK page knob 4 = the kick's level, HATS 3 + 4 = closed / open … */
+static int seq_shift;                           /* (declared again below – a tentative definition) */
+static int drum_lvl_knob(uint32_t i)            /* -1: this knob stays what it is */
+{
+    static const int8_t SY[8][4] = {   /* synth kit: PERFORM KICK SNARE CLAP HATS RIM/SNAP PERC KIT */
+        {P_DL_KICK, P_DL_SNARE, P_DL_CLAP, P_DL_CH}, {-1, -1, -1, P_DL_KICK}, {-1, -1, -1, P_DL_SNARE}, {-1, -1, -1, P_DL_CLAP},
+        {-1, -1, P_DL_CH, P_DL_OH}, {-1, -1, P_DL_RIM, P_DL_SNAP}, {-1, -1, -1, P_DL_PERC}, {-1, -1, -1, -1}};
+    static const int8_t AC[8][4] = {   /* acoustic / HIP HOP: PERFORM KICK/SN HATS TOMS CYMBALS KIT */
+        {P_DL_KICK, P_DL_SNARE, P_DL_CH, P_DL_OH}, {-1, P_DL_KICK, -1, P_DL_SNARE}, {-1, P_DL_CH, P_DL_OH, -1}, {-1, P_DL_CLAP, -1, P_DL_RIM},
+        {-1, P_DL_SNAP, -1, P_DL_PERC}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}};
+    if (!seq_shift || trk_type(sel) != T_DRUMS || page > PG_S7 || i > 3u) return -1;
+    return (live_p[sel].v[P_KIT_SRC] ? AC : SY)[page][i];
+}
+static const char *drum_lvl_label(uint32_t p)   /* "KICK LVL" – the drum's name as this kit calls it */
+{
+    static char b[4][16]; static uint32_t r; char *s = b[r++ & 3u];
+    s[0] = 0; scat(s, drum_name(live_p[sel].v, p - P_DL_KICK)); scat(s, " LVL");
+    return s;
+}
+/* (0.31) SHIFT on the SAMPLER's EDIT page: knob 1 = its input's GAIN, knob 2 = the THRESHOLD (0: the knob stays) */
+static int smp_shift_knob(uint32_t i) { return seq_shift && trk_type(sel) == T_SMP && page == PG_PERFORM && i < 3u ? (i == 2u ? PS_REV : i ? PS_THR : PS_GAIN) : 0; }
+static uint8_t *smp_gain_ref(void);             /* (bm_sampler.h) */
 static uint32_t snd_count(void) { uint32_t ty = trk_type(sel); return ty == T_DRUMS && live_p[sel].v[P_KIT_SRC] ? SND_N_AC : SND_N[ty]; }   /* SOUND's pages for this track (TYPE follows them) */
 static uint32_t cycle_page(uint32_t first, uint32_t count)   /* a key steps through its pages */
 {
@@ -73,7 +106,8 @@ static void page_knobs(knob_t *k)
         if (page == PG_GLOBAL) {
             static const char *const GL[4] = {"TEMPO", "CLICK", "MIDI CH", "METER"};   /* (12.11.2026: METER, the track's; SHIFT: TUNE) */
             static char ml[10]; ml[0] = 0; scat(ml, "METER "); ml[6] = (char)('A' + sel % NTRK); ml[7] = 0;
-            k[i].label = i == 3 ? (seq_shift ? "TUNE" : ml) : GL[i];
+            k[i].label = i == 3 ? (seq_shift ? "TUNE" : ml) : i == 2 && seq_shift ? "AUTO SAVE" : GL[i];
+            if (i == 2 && seq_shift) { scat(k[i].value, set.au_autosave ? "ON" : "OFF"); k[i].v = set.au_autosave ? 1.0f : 0.0f; continue; }   /* (0.31) takes to the card at once, or only when named */
             if (i == 0) { fmt_u(k[i].value, set.tempo); k[i].v = (set.tempo - 40) / 200.0f; }
             else if (i == 1) { scat(k[i].value, CLICK_NAME[set.click % NCLICK]); k[i].v = (float)(set.click % NCLICK) / (NCLICK - 1); }
             else if (i == 2) { if (set.midi_auto) scat(k[i].value, "AUTO"); else if (set.midi_ch) fmt_u(k[i].value, set.midi_ch); else scat(k[i].value, "OMNI"); k[i].v = set.midi_auto ? 0.0f : (set.midi_ch + 1u) / 17.0f; }
@@ -82,6 +116,15 @@ static void page_knobs(knob_t *k)
             continue;
         }
         int p = PG(page)->p[i];
+        if (drum_lvl_knob((uint32_t)i) >= 0) p = drum_lvl_knob((uint32_t)i);   /* (0.31) SHIFT: the drum's level */
+        if (smp_shift_knob((uint32_t)i)) p = smp_shift_knob((uint32_t)i);
+        if (p == PS_REV) { k[i].label = "REVERSE"; scat(k[i].value, live_p[sel].v[P_SM_REV] ? "REV" : "FWD"); k[i].v = live_p[sel].v[P_SM_REV] ? 1.0f : 0.0f; continue; }
+        if (p == PS_GAIN || p == PS_THR) {      /* (0.31) the input's GAIN, the THRESHOLD */
+            uint32_t q = sel % 8u;
+            if (p == PS_GAIN) { uint32_t g = smp_gain_ref() ? *smp_gain_ref() : 0u; k[i].label = "IN GAIN"; scat(k[i].value, "+"); fmt_u(k[i].value + 1, g); scat(k[i].value, " dB"); k[i].v = g / 40.0f; }
+            else { k[i].label = "THRESHOLD"; if (!set.smp_thr[q]) scat(k[i].value, "OFF"); else { scat(k[i].value, "-"); fmt_u(k[i].value + 1, 55u - set.smp_thr[q]); scat(k[i].value, " dB"); } k[i].v = set.smp_thr[q] / 54.0f; }
+            continue;
+        }
         if (p < 0) continue;
         if (p == PS_CUT || p == PS_MOVE) {      /* (0.21) the SAMPLER's CHOP page: the chosen cut, where it is */
             uint32_t q = sel % 8u, n = sm_n[q], a2, b2, hi2;
@@ -98,7 +141,13 @@ static void page_knobs(knob_t *k)
             const char *ml = mi_label((uint32_t)p, ed_patch((uint32_t)p)->v); if (ml) k[i].label = ml;
             if (p >= P_MI_CC1N && p <= P_MI_CC4N) { k[i].value[0] = 0; scat(k[i].value, "CC "); fmt_u(k[i].value + 3, mi_ccn(v)); }
         }
+        if (trk_type(sel) == T_EP) {            /* (0.31) */
+            const char *el = ep_label((uint32_t)p, ed_patch((uint32_t)p)->v); if (el) k[i].label = el;
+            if (p == P_EP_MODEL) { k[i].value[0] = 0; scat(k[i].value, v & 1u ? "REED" : "TINE"); }
+            else if (p == P_EP_STEREO) { k[i].value[0] = 0; if (v < 8u) scat(k[i].value, "MONO"); else if (v > 119u) scat(k[i].value, "L-R"); else { fmt_u(k[i].value, (v * 100u + 63u) / 127u); scat(k[i].value, "%"); } }
+        }
         if (trk_type(sel) == T_DRUMS && live_p[sel].v[P_KIT_SRC] && ac_label((uint32_t)p, live_p[sel].v[P_KIT_SRC])) k[i].label = ac_label((uint32_t)p, live_p[sel].v[P_KIT_SRC]);
+        if (drum_lvl_knob((uint32_t)i) >= 0) k[i].label = drum_lvl_label((uint32_t)p);
         k[i].v = PDEF[p].max ? (float)v / (float)PDEF[p].max : 0;
         k[i].bip = PDEF[p].kind == K_BIP || PDEF[p].kind == K_SEMI || PDEF[p].kind == K_MORPH;
         if (p == P_SM_ST_C || p == P_SM_EN_C) {   /* (0.21) as a time into the sample */
@@ -130,12 +179,18 @@ static void knob_turn(int i, int e)             /* e: whole detents */
     if (page == PG_GLOBAL) {
         if (i == 0) set.tempo = (uint8_t)clampi(set.tempo + e, 40, 240);
         else if (i == 1) set.click = (uint8_t)clampi((int32_t)(set.click % NCLICK) + (e > 0 ? 1 : -1), 0, NCLICK - 1);
+        else if (i == 2 && seq_shift) { set.au_autosave = e > 0 ? 1u : 0u; say(set.au_autosave ? "AUTO SAVE ON – EVERY TAKE TO THE CARD" : "AUTO SAVE OFF – SAVE > AUDIO KEEPS A TAKE"); }
         else if (i == 2) { int32_t v = clampi((set.midi_auto ? -1 : (int32_t)set.midi_ch) + e, -1, 16); set.midi_auto = v < 0; set.midi_ch = (uint8_t)(v < 0 ? 0 : v); }   /* AUTO · OMNI · 1..16 */
         else if (!seq_shift) { meter_turn(e); return; }
         else set.tune = (int8_t)clampi(set.tune + e, -50, 50);
         mix_apply(); set_touch(); return;
     }
     int p = PG(page)->p[i];
+    if (drum_lvl_knob((uint32_t)i) >= 0) p = drum_lvl_knob((uint32_t)i);   /* (0.31) SHIFT: the drum's level */
+    if (smp_shift_knob((uint32_t)i)) p = smp_shift_knob((uint32_t)i);
+    if (p == PS_GAIN) { uint8_t *g = smp_gain_ref(); if (g) { *g = (uint8_t)clampi((int32_t)(*g > 40u ? 40u : *g) + e, 0, 40); set_touch(); } return; }
+    if (p == PS_REV) { live_p[sel].v[P_SM_REV] = e > 0 ? 1u : 0u; trk_edited[sel % NTRK] = 1; return; }
+    if (p == PS_THR) { uint8_t *th = &set.smp_thr[sel % 8u]; *th = (uint8_t)clampi((int32_t)*th + e, 0, 54); set_touch(); return; }
     if (p < 0) return;
     if (p == PS_CUT) { uint32_t q = sel % 8u; if (sm_n[q] > 1u) sm_cur[q] = (uint32_t)clampi((int32_t)sm_cur[q] + (e > 0 ? 1 : -1), 0, (int32_t)sm_n[q] - 1); return; }   /* (0.21) CHOP by hand */
     if (p == PS_MOVE) { sm_cut_move(sel, e, seq_shift); return; }
@@ -212,6 +267,12 @@ static void randomize(void)
         d->v[P_ST_16] = (uint8_t)(rn(0, 1) ? 0 : rn(40, 120)); d->v[P_ST_8] = (uint8_t)rn(70, 127); d->v[P_ST_4] = (uint8_t)rn(0, 120); d->v[P_ST_ENS] = (uint8_t)rn(80, 127);
         d->v[P_AA] = (uint8_t)rn(60, 95); d->v[P_AS] = 127; d->v[P_AR] = (uint8_t)rn(80, 104); d->v[P_CUTOFF] = (uint8_t)rn(80, 120); d->v[P_RESO] = 0; d->v[P_FENV_AMT] = 64;
         d->v[P_MODE] = M_POLY; d->v[P_GLIDE] = 0;
+    }
+    if (ty == T_EP) {                           /* (0.31) E-PIANO: a tine or a reed, struck somewhere between soft and hard */
+        d->v[P_EP_MODEL] = (uint8_t)rn(0, 1); d->v[P_EP_TONE] = (uint8_t)rn(30, 95); d->v[P_EP_BARK] = (uint8_t)rn(15, 115); d->v[P_EP_BELL] = (uint8_t)rn(20, 100);
+        d->v[P_EP_DECAY] = (uint8_t)rn(60, 100); d->v[P_EP_TREM] = (uint8_t)(rn(0, 1) ? 0 : rn(25, 90)); d->v[P_EP_RATE] = (uint8_t)rn(30, 75); d->v[P_EP_STEREO] = (uint8_t)(rn(0, 1) ? 127 : 0);
+        d->v[P_EP_DRIVE] = (uint8_t)(rn(0, 1) ? 0 : rn(10, 80)); d->v[P_EP_NOISE] = (uint8_t)rn(20, 60); d->v[P_EP_VELO] = (uint8_t)rn(70, 110);
+        d->v[P_AA] = 0; d->v[P_AR] = (uint8_t)rn(56, 74); d->v[P_CUTOFF] = (uint8_t)rn(100, 127); d->v[P_RESO] = 0; d->v[P_FENV_AMT] = 64; d->v[P_MODE] = M_POLY; d->v[P_GLIDE] = 0;
     }
     if (ty == T_DX) {                           /* DX: one of the factory voices, the macros a little off the middle */
         memcpy(d->dx, DX_SYNTH[rn(0, DX_NSYNTH - 2u)], DX_VOICE);

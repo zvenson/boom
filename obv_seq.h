@@ -18,7 +18,11 @@ static const uint8_t ROLL_N[6] = {1, 2, 3, 4, 6, 8};
 typedef struct { uint8_t note[SEQ_CHORD], vel, gate, ratch, chance, nudge, nv[SEQ_CHORD], nr[SEQ_CHORD]; } step_t;   /* note 0 = none; ratch 0..3 = 1..4 hits;
                                                                                          nudge 0..127: that much of the step later */
 #define STEP_OFF 0x80u                          /* in ratch: the step is switched off, its notes kept */
-typedef struct { uint16_t len; uint8_t div, swing; int8_t transp; uint8_t mute, pad[2]; } seqtrk_t;   /* swing 50..75 % */
+typedef struct { uint16_t len; uint8_t div, swing; int8_t transp; uint8_t mute, pad[2]; uint8_t tm, tpad; uint16_t ts, te; } seqtrk_t;
+/* (0.32, Sven: "Spur bei Length 0 geht in den Time Mode – ohne Takte") tm 1: TIME – the track's loop is not whole steps: it
+ * runs from ts to te (in 1/128 of a step: step * 128 + how far into it), te 0 = no loop yet (REC records it freely, from
+ * the moment REC is pressed until REC is pressed again). The notes still sit on the steps, with their nudge. */
+#define TM_FINE 128u   /* swing 50..75 % · mute (0.31): the track in this pattern 1 = plays, 2 = stopped, 0 = not stored */
 /* (OberVave 3) the knobs recorded: per track up to NLANE lanes, each one parameter of the track's sound with a value per
  * step (AUTO_NONE: that step leaves it as it is). REC running + a knob turned = the value written on the step playing;
  * the player sets it on its step. After the steps, behind auto_magic: a pattern saved before has none (cleared at load) */
@@ -46,6 +50,7 @@ static volatile uint32_t ctl_seq_run, ctl_seq_restart;
 /* the tracks' start / stop: the main loop flips a bit of ctl_trk_req, the ISR takes it on the next downbeat (stopped:
  * at once) and flips the same bit of trk_req_seen; ctl_trk_on is the ISR's: which tracks play */
 static volatile uint32_t ctl_trk_req, ctl_trk_on = (1u << NTRK) - 1u;
+static volatile uint32_t ui_pat_old_on;         /* (0.31) which tracks played in the pattern the ISR just swapped out */
 static uint32_t trk_req_seen;
 static uint32_t trk_pending(void) { return (ctl_trk_req ^ trk_req_seen) & ((1u << NTRK) - 1u); }
 /* the next pattern: the main loop reads it into pat_q and sets ctl_pat_swap; the ISR swaps it in on the next downbeat
@@ -95,6 +100,7 @@ static void pat_init(pattern_t *p)
         p->trk[t].transp = 0;
         p->trk[t].mute = 0;
         p->trk[t].pad[0] = p->trk[t].pad[1] = 0;
+        p->trk[t].tm = p->trk[t].tpad = 0; p->trk[t].ts = p->trk[t].te = 0;
     }
 }
 static void pat_factory(uint32_t n, pattern_t *p)   /* a pattern never saved: empty, four bars of sixteenths */
@@ -116,14 +122,18 @@ static int seq_live(uint32_t t, uint32_t n) { return ctl_live_hold[t % NTRK][n >
 /* an arp take (REC, the arp on the track playing into it): the track's steps are not played meanwhile – you hear the arp
  * that is being written, not the last round of it on top */
 static volatile uint32_t ctl_rec_mute;
+/* (0.32) TIME, the free take: ctl_tm_grow bit t = track t records its loop now (no wrap until REC closes it);
+ * ctl_tm_go bit t = start it from its top in the next block (not on the bar) */
+static volatile uint32_t ctl_tm_grow, ctl_tm_go;
 
 static void seq_release_t(uint32_t t)
 {
     seqrun_t *r = &sr[t];
     uint32_t i;
-    for (i = 0; i < r->nsnd; i++) if (!seq_live(t, r->snd[i])) voice_release(t, r->snd[i], 1);
+    for (i = 0; i < r->nsnd; i++) if (!seq_live(t, r->snd[i])) seq_note_off(t, r->snd[i]);
     r->nsnd = 0;
 }
+static int seq_feeds_arp(uint32_t p) { return pt[p % NPART].p->v[P_ARP_MODE] != A_OFF && !pat.trk[p % NTRK].pad[1]; }   /* (0.31) */
 static uint32_t seq_note(const step_t *s, uint32_t i, int32_t transp)
 {
     return (uint32_t)clampi((int32_t)s->note[i] + transp, 1, 127);
@@ -136,7 +146,7 @@ static void seq_sound(uint32_t t, const step_t *s, int32_t transp)
         uint32_t n = seq_note(s, i, transp);
         if (seq_live(t, n) || ctl_rec_mute >> t & 1u) continue;
         TRACE('S', t, n);
-        voice_trigger(t, n, s->nv[i] ? s->nv[i] : s->vel ? s->vel : 100u);
+        seq_note_on(t, n, s->nv[i] ? s->nv[i] : s->vel ? s->vel : 100u);
         r->snd[r->nsnd++] = (uint8_t)n;
     }
 }
@@ -155,7 +165,7 @@ static void seq_tie_into(uint32_t t, const step_t *s, int32_t transp, uint32_t p
     uint32_t i, j, keep = 0;
     for (i = j = 0; i < r->nsnd; i++) {
         if (play && seq_has(s, r->snd[i], transp)) { r->snd[j++] = r->snd[i]; keep++; }
-        else if (!seq_live(t, r->snd[i])) voice_release(t, r->snd[i], 1);
+        else if (!seq_live(t, r->snd[i])) seq_note_off(t, r->snd[i]);
     }
     r->nsnd = j;
     if (!play) return;
@@ -163,7 +173,7 @@ static void seq_tie_into(uint32_t t, const step_t *s, int32_t transp, uint32_t p
         uint32_t m = seq_note(s, i, transp);
         for (j = 0; j < keep && r->snd[j] != m; j++) ;
         if (j < keep || seq_live(t, m) || ctl_rec_mute >> t & 1u) continue;
-        voice_trigger(t, m, s->nv[i] ? s->nv[i] : s->vel ? s->vel : 100u);
+        seq_note_on(t, m, s->nv[i] ? s->nv[i] : s->vel ? s->vel : 100u);
         r->snd[r->nsnd++] = (uint8_t)m;
     }
 }
@@ -265,7 +275,12 @@ static int snap_q8(uint32_t t, uint32_t frame, uint32_t *q8)   /* track t's Q8 p
     if (!len || !dur || back < 0 || back > (int32_t)(FS * 2u)) return 0;
     {
         int64_t q = (int64_t)(pos % len) * 256 + (int64_t)cnt * 256 / dur - (int64_t)back * 256 / dur, L = (int64_t)len * 256;
-        q %= L; if (q < 0) q += L;
+        const seqtrk_t *k = &pat.trk[t % NTRK];
+        if (k->tm && k->te > k->ts) {           /* (0.32 TIME) the loop ts .. te: back across its seam */
+            int64_t lo = (int64_t)k->ts * 2, hi = (int64_t)k->te * 2;
+            while (q < lo) q += hi - lo;
+            while (q >= hi) q -= hi - lo;
+        } else { q %= L; if (q < 0) q += L; }
         *q8 = (uint32_t)q;
     }
     return 1;
@@ -284,6 +299,7 @@ static void mx_swap_in(void)                    /* (ISR, inside the pattern swap
     ctl_m_vol = mx_q.m_vol; ctl_m_dj = mx_q.m_dj; ctl_m_drive = mx_q.m_drive; ctl_m_comp = mx_q.m_comp;
     for (t = 0; t < 3u; t++) ctl_mfx[t] = mx_q.mfx[t];   /* (BOOM: MASTER FX follow the pattern; REPEAT is never a pattern's) */
     if (mx_q.tempo) ctl_tempo = mx_q.tempo;     /* (3.2) the pattern's tempo, from its first note */
+    for (t = 0; t < NPART; t++) for (uint32_t i = 0; i < 5u; i++) ctl_eq[t][i] = mx_q.eq[t][i];   /* (0.31) its EQ on the same downbeat */
     ctl_mx_swap = 0;
 }
 
@@ -310,6 +326,13 @@ static void seq_eighth(uint32_t e, uint32_t quarter)
             /* the next pattern (2 = being swapped in: the main loop leaves pat_q alone): the tracks from the top */
             if (ctl_pat_keep) pat_old = pat;
             pat = pat_q;
+            {   /* (0.31, Sven: "in Pattern 12 laufen andere Spuren als in 11") the new pattern's tracks on / off: trk.mute 1 = plays,
+                 * 2 = stopped, 0 = a pattern from before (the tracks stay as they are) */
+                uint32_t on = ctl_trk_on;
+                ui_pat_old_on = on;
+                for (t = 0; t < NTRK; t++) { if (pat.trk[t].mute == 1u) on |= 1u << t; else if (pat.trk[t].mute == 2u) on &= ~(1u << t); }
+                ctl_trk_on = on;
+            }
             if (ctl_snd_swap) { for (t = 0; t < NTRK; t++) { snd_old[t] = live_p[t]; live_p[t] = snd_q[t]; } ctl_snd_swap = 0; }
             mx_swap_in();                       /* (its mixer, drive and master on the same downbeat) */
             au_swap_in();                       /* (3.8: and its audio tracks, from their top) */
@@ -369,30 +392,45 @@ static void seq_tick(void)
     if (seq_beat_cnt >= q)                      /* the next beat: what is over keeps going (a DAW's quarter is any length) */
         seq_beat_cnt = seq_beat_cnt - q < CTL ? seq_beat_cnt - q : 0u;
     if (ctl_count) return;                      /* counting in: no steps yet */
+    {   /* (0.32 TIME) a free take begins: its track from the top, now */
+        uint32_t go = __atomic_exchange_n(&ctl_tm_go, 0u, __ATOMIC_ACQ_REL);
+        for (t = 0; t < NTRK; t++) if (go >> t & 1u) { ctl_trk_on |= 1u << t; seq_from_top(t); }
+    }
     for (t = 0; t < NTRK; t++) {
         seqrun_t *r = &sr[t];
         const seqtrk_t *k = &pat.trk[t];
         const step_t *s;
-        uint32_t len = k->len;
+        uint32_t len = k->len, tmw = k->tm && k->te > k->ts, ecut = 0, early, wrap = 0;
+        if (k->tm && !tmw && !(ctl_tm_grow >> t & 1u)) len = 0;   /* (0.32 TIME, no loop yet: silent until REC) */
+        if (tmw && (k->te & (TM_FINE - 1u)) && r->step == k->te / TM_FINE && r->dur) ecut = (r->dur * (k->te & (TM_FINE - 1u))) >> 7;
+        early = ecut && r->cnt >= ecut;         /* (TIME: the loop ends inside this step) */
         if (!len || !(ctl_trk_on >> t & 1u) || (ctl_au_type >> t & 1u) || (ctl_trk_daw >> t & 1u)) { seq_release_t(t);   /* (BOOM 0.4: the DAW plays it) */ r->tie = 0; r->wait = NO_WAIT; r->hold_end = 0; continue; }
-        if (r->cnt >= r->dur) {                 /* the next step */
+        if (r->cnt >= r->dur || early) {        /* the next step */
             uint32_t dv = DIV_PER_QUARTER[k->div % NDIV], base = q / dv, sw, carry = 0;
             r->frac += q % dv;                  /* (the rest of q spread over the steps: div steps are exactly a quarter) */
             if (r->frac >= dv) { r->frac -= dv; base++; }
             if (r->hold_end) { r->hold_end = 0; seq_release_t(t); }   /* (a carried note: over by now) */
             if (r->nsnd && r->wait == NO_WAIT && r->gate_at != 0xFFFFFFFFu) {   /* a late note (nudged) lasts into this step */
                 uint32_t e = r->on_at + r->rat_i * r->sub + r->gate_at;
-                if (e > r->dur) carry = e - r->dur;
+                uint32_t bd = early ? ecut : r->dur;
+                if (e > bd) carry = e - bd;
             }
-            r->cnt -= r->dur;
-            r->step = r->step + 1u >= len ? 0u : r->step + 1u;
-            sw = base * (uint32_t)(clampi(k->swing, 50, 75) - 50) / 50u;
+            r->cnt -= early ? ecut : r->dur;
+            if (tmw) {                          /* (0.32 TIME) from ts on, round at te */
+                wrap = r->step == 0xFFFFFFFFu || early || r->step + 1u >= (k->te + TM_FINE - 1u) / TM_FINE;
+                r->step = wrap ? k->ts / TM_FINE : r->step + 1u;
+            } else r->step = r->step + 1u >= len ? 0u : r->step + 1u;
+            sw = tmw ? 0u : base * (uint32_t)(clampi(k->swing, 50, 75) - 50) / 50u;
             r->dur = r->step & 1u ? base - sw : base + sw;   /* swing: the first of each pair longer */
             if (r->dur < CTL) r->dur = CTL;
             s = seq_step(t, r->step);
             seq_auto(t, r->step);
             TRACE('T', t, r->step * 1000000u + (s->note[0] ? (uint32_t)s->note[0] * 1000u : 0u) + (s->note[1] ? 900u : 0u) + (s->gate >= GATE_TIE ? 1u : 0u));
             r->play = s->note[0] && !(s->ratch & STEP_OFF) && (s->chance >= 100u || xorshift(&rnd_state) % 100u < s->chance);
+            if (wrap && (k->ts & (TM_FINE - 1u))) {   /* (TIME: START inside the step – what lies before it is not played) */
+                r->cnt += (r->dur * (k->ts & (TM_FINE - 1u))) >> 7;
+                if (s->nudge < (k->ts & (TM_FINE - 1u))) r->play = 0;
+            }
             r->wait = NO_WAIT;
             r->on_at = 0;
             if (r->play && s->nudge) {          /* later in the step: the old notes go (a late one at its end), the new ones when it is time */

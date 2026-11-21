@@ -31,12 +31,19 @@ static struct {                                 /* = OberVave 2.0's settings, fi
                                                    (its steps are silent) · 1 = MIDI CH AUTO (OMNI on the device, 1-6 = A-F in a DAW); ok: IO_OK */
     uint8_t mfx[NMFX], mfx_ok;
     uint16_t smc[8][17]; uint8_t smc_n[8], smc_ok;
-    uint8_t trk_mch[8], mch_ok;                 /* (0.24, Sven) MIDI IN per track: 0 = SELECTED (plays while chosen), 1..16 = always that channel; ok: MCH_OK */
+    uint8_t trk_mch[8], mch_ok;
+    uint8_t eq_lo[8], eq_mid[8], eq_mf[8], eq_hi[8], eq_cut[8], eq_ok;
+    uint8_t smp_thr[8], thr_ok;
+    uint8_t au_autosave, as_ok;                 /* (0.31, Sven: "nix auto save") 0: a take stays in memory until SAVE ▸ AUDIO names it (as an MPC); 1: every take written at once; ok: AS_OK */                 /* (0.31, Sven: "keine Aussteuerung, kein Threshold") a SAMPLER's threshold: 0 OFF, 1..54 = -54..-1 dBFS; ok: THR_OK */   /* (0.31, Sven: "im Mixer auch einen EQ") per track: LOW / MID / HIGH 64 = 0 dB (+-15),
+                                                 * MID's FREQ 0..127 = 200 Hz .. 5 kHz, LOW CUT 0 OFF · 1 40 · 2 80 · 3 150 Hz; ok: EQ_OK */                 /* (0.24, Sven) MIDI IN per track: 0 = SELECTED (plays while chosen), 1..16 = always that channel; ok: MCH_OK */
    /* (0.21) a SAMPLER's cuts moved by hand: each as 1/65536 of its take; smc_n 0 = the automatic ones; ok: SMC_OK */                  /* BOOM: MASTER FX (mixer row 2) – FILTER 0..128 (64 off), CRUSH, ECHO 0..127, REPEAT (never saved on); ok: MFX_OK */
 } set;
 #define MFX_OK 0x4Fu
 #define SMC_OK 0x5Cu
 #define MCH_OK 0x3Du
+#define EQ_OK 0x5Eu
+#define THR_OK 0x7Bu
+#define AS_OK 0x4Au
 static uint8_t midi_last_ch;                    /* (0.24) the channel the last MIDI note came on (shown when MIDI IN is turned) */
 #define IO_OK 0x10u
 #define AU_OK 0xA7u
@@ -77,6 +84,7 @@ static void fx_norm(uint8_t *fx)
     if (fx[P_DLY_MIX - P_CHO_RATE] >= NDM) fx[P_DLY_MIX - P_CHO_RATE] = DM_ANALOG;
     if (fx[P_REV_MIX - P_CHO_RATE] >= NRM) fx[P_REV_MIX - P_CHO_RATE] = RM_PLATE;
 }
+static void eq_defaults(void) { for (uint32_t q = 0; q < 8u; q++) { set.eq_lo[q] = set.eq_mid[q] = set.eq_hi[q] = 64; set.eq_mf[q] = 64; set.eq_cut[q] = 0; } set.eq_ok = EQ_OK; }   /* (0.31) flat */
 static void settings_defaults(void)
 {
     uint32_t t;
@@ -97,6 +105,9 @@ static void settings_defaults(void)
     memset(set.smc, 0, sizeof set.smc); memset(set.smc_n, 0, sizeof set.smc_n); set.smc_ok = SMC_OK;
     set.trk_own = set.trk_daw = 0; set.midi_auto = 1; set.io_ok = IO_OK;
     memset(set.trk_mch, 0, sizeof set.trk_mch); set.mch_ok = MCH_OK;
+    eq_defaults();
+    memset(set.smp_thr, 0, sizeof set.smp_thr); set.thr_ok = THR_OK;
+    set.au_autosave = 0; set.as_ok = AS_OK;
 }
 
 static void prog_get(uint32_t n, patch_t *p)    /* program n: the user's, else the factory's (1-16 kits, 17-32 basses, 33-99 MEL) */
@@ -122,7 +133,18 @@ static void prog_name(uint32_t n, char *out)    /* its 10-character name, traili
     out[PATCH_NAME] = 0;
     for (i = (int)PATCH_NAME - 1; i >= 0 && out[i] == ' '; i--) out[i] = 0;
 }
-static uint32_t prog_type(uint32_t n) { patch_t p; prog_get(n, &p); return p.v[P_TYPE] % NTYPE; }   /* the kind of sound in slot n */
+static uint8_t pk_kind[NPROG]; static int pk_valid;   /* (0.31) each slot's kind, remembered – 200 slots read anew only after a save or a load */
+static void pk_fill(void) { patch_t p; for (uint32_t m = 0; m < NPROG; m++) { prog_get(m, &p); pk_kind[m] = (uint8_t)(p.v[P_TYPE] % NTYPE); } pk_valid = 1; }
+static uint32_t prog_type(uint32_t n) { if (!pk_valid) pk_fill(); return pk_kind[n % NPROG]; }   /* the kind of sound in slot n */
+/* (0.31, Sven 20.11.: "Presets durcheinander – Bass startet nicht bei 1, E-Piano bei 193") the number a sound SHOWS: its place
+ * among the slots of its kind (BASS 1-16, E-PIANO 1-8), not the slot in the store of all kinds. MIDI program changes keep the slot. */
+static uint32_t prog_num(uint32_t n)
+{
+    uint32_t ty = prog_type(n), c = 1;
+    n %= NPROG;
+    for (uint32_t m = 0; m < n; m++) if (pk_kind[m] == ty) c++;
+    return c;
+}
 static uint32_t trk_type(uint32_t t) { return live_p[t % NTRK].v[P_TYPE] % NTYPE; }   /* the kind of sound track t plays */
 static int midi_trk_any(void) { for (uint32_t t = 0; t < NTRK; t++) if (trk_type(t) == T_MIDI) return 1; return 0; }   /* (0.30) a MIDI track: the clock and START / STOP go out */
 static uint32_t prog_step_type(uint32_t from, int dir, uint32_t ty)   /* the next slot of that kind, round the 99 (none: stays) */
@@ -175,6 +197,7 @@ static void play_note(uint32_t on, uint32_t note, uint32_t vel)
 
 static void mix_apply(void)                     /* the settings into the engine; mute and solo as one mask */
 {
+    for (uint32_t q = 0; q < NTRK; q++) { ctl_eq[q][0] = set.eq_lo[q]; ctl_eq[q][1] = set.eq_mid[q]; ctl_eq[q][2] = set.eq_mf[q]; ctl_eq[q][3] = set.eq_hi[q]; ctl_eq[q][4] = set.eq_cut[q] & 3u; }
     uint32_t t, solo = set.mix_solo & ((1u << NTRK) - 1u);
     for (t = 0; t < NTRK; t++) {
         ctl_mix_lvl[t] = set.mix_lvl[t] > 127u ? 127u : set.mix_lvl[t];
@@ -220,29 +243,53 @@ static void master_fx(float *l, float *r, int n)
     uint32_t rep = ctl_mfx[3] % 6u, q = quarter_len();
     float crush = (float)ctl_mfx[1] / 127.0f, echo = (float)ctl_mfx[2] / 127.0f;
     int dj = (int)ctl_mfx[0] - 64, fmode = dj <= -2 ? 1 : dj >= 2 ? 2 : 0;
-    /* REPEAT */
-    if (rep && !rep_on) { rep_on = 1; rep_fill = 0; rep_pos = 0; rep_tail = 0; }
-    if (!rep && rep_on) { rep_on = 0; if (rep_fill >= rep_len + 128u) rep_tail = 256u; }
-    if (rep_tail) {                                    /* (0.17) out of the loop over 256 samples, not at once */
-        for (int i = 0; i < n && rep_tail; i++, rep_tail--) {
-            if (rep_pos >= rep_len) rep_pos = 0;
-            float f = (float)rep_tail / 256.0f;
-            l[i] = l[i] * (1.0f - f) + rep_buf[0][rep_pos] * f; r[i] = r[i] * (1.0f - f) + rep_buf[1][rep_pos] * f; rep_pos++;
-        }
-    }
-    if (rep_on) {
-        uint32_t len = q / REP_DIV[rep]; if (len > MFX_REP_N - 256u) len = MFX_REP_N - 256u; if (len < 64u) len = 64u;
-        rep_len = len;
-        for (int i = 0; i < n; i++) {
-            if (rep_fill < rep_len + 128u) { rep_buf[0][rep_fill] = l[i]; rep_buf[1][rep_fill] = r[i]; rep_fill++; }   /* (catching: the sum passes) */
-            else {
+    /* REPEAT (0.31, Sven 21.11.: "knackt manchmal") – every jump crossfades over REP_XF samples: into the loop (the seam
+     * fades from what comes live), a new length while it loops (from where the old one was), a length longer than what
+     * was caught (the loop fades into the sum while it catches again), out of it. No zero crossings: a stereo sum's two
+     * sides seldom cross together and a bass's next one can be 10 ms away */
+#define REP_XF 64u                              /* (1.3 ms – Sven: "so kurz wie möglich"; shorter clicks again on a bass) */
+    {
+        static uint32_t xf_n, xf_pos, xf_len, xf_live;
+        if (rep && !rep_on) { rep_on = 1; rep_fill = 0; rep_pos = 0; rep_tail = 0; xf_n = 0; rep_len = 0; }
+        if (!rep && rep_on) { rep_on = 0; if (rep_len && rep_fill >= rep_len) rep_tail = REP_XF; xf_n = 0; }
+        if (rep_tail) {                                /* (0.17) out of the loop over REP_XF samples, not at once */
+            for (int i = 0; i < n && rep_tail; i++, rep_tail--) {
                 if (rep_pos >= rep_len) rep_pos = 0;
-                float a = rep_buf[0][rep_pos], b = rep_buf[1][rep_pos];
-                if (rep_pos < 128u && rep_len + rep_pos < rep_fill) {   /* the seam: fade from what came after the loop's end */
-                    float f = (float)rep_pos / 128.0f;
-                    a = a * f + rep_buf[0][rep_len + rep_pos] * (1.0f - f); b = b * f + rep_buf[1][rep_len + rep_pos] * (1.0f - f);
+                float f = (float)rep_tail / (float)REP_XF;
+                l[i] = l[i] * (1.0f - f) + rep_buf[0][rep_pos] * f; r[i] = r[i] * (1.0f - f) + rep_buf[1][rep_pos] * f; rep_pos++;
+            }
+        }
+        if (rep_on) {
+            uint32_t len = q / REP_DIV[rep]; if (len > MFX_REP_N - 256u) len = MFX_REP_N - 256u; if (len < 64u) len = 64u;
+            if (!rep_len) rep_len = len;
+            else if (len != rep_len) {
+                if (rep_fill >= rep_len) {             /* it loops: from where the old loop is, crossfaded */
+                    xf_live = 0; xf_pos = rep_pos; xf_len = rep_len; xf_n = REP_XF;
+                    if (len <= rep_fill) rep_pos %= len;   /* (shorter, or longer and caught: on its downbeat) */
+                    else { rep_fill = 0; rep_pos = 0; }    /* (longer than caught: it catches again, the loop fading into the sum) */
+                } else if (len <= rep_fill) { xf_live = 1; xf_n = REP_XF; rep_pos = 0; }   /* (catching, the new one already caught: from the sum into it) */
+                rep_len = len;
+            }
+            for (int i = 0; i < n; i++) {
+                float il = l[i], ir = r[i], a, b;
+                if (rep_fill < rep_len + REP_XF && rep_fill < MFX_REP_N) { rep_buf[0][rep_fill] = il; rep_buf[1][rep_fill] = ir; rep_fill++; }   /* (the loop, then its seam) */
+                if (rep_fill <= rep_len) { a = il; b = ir; }   /* (catching: the sum passes) */
+                else {
+                    if (rep_pos >= rep_len) rep_pos = 0;
+                    a = rep_buf[0][rep_pos]; b = rep_buf[1][rep_pos];
+                    if (rep_pos < REP_XF && rep_len + rep_pos < rep_fill) {   /* the seam: from what came after the loop's end (the first time: the sum as it comes) */
+                        float f = (float)rep_pos / (float)REP_XF;
+                        a = a * f + rep_buf[0][rep_len + rep_pos] * (1.0f - f); b = b * f + rep_buf[1][rep_len + rep_pos] * (1.0f - f);
+                    }
+                    rep_pos++;
                 }
-                l[i] = a; r[i] = b; rep_pos++;
+                if (xf_n) {                            /* a jump: from the old stream */
+                    float f = (float)xf_n / (float)REP_XF, oa, ob;
+                    if (xf_live) { oa = il; ob = ir; }
+                    else { if (xf_pos >= xf_len) xf_pos = 0; oa = rep_buf[0][xf_pos]; ob = rep_buf[1][xf_pos]; xf_pos++; }
+                    a = a * (1.0f - f) + oa * f; b = b * (1.0f - f) + ob * f; xf_n--;
+                }
+                l[i] = a; r[i] = b;
             }
         }
     }

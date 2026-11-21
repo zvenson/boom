@@ -68,10 +68,23 @@ _Static_assert(NPARAM + PATCH_NAME <= PATCH_BYTES, "the patch outgrew PATCH_BYTE
 #define P_MI_CC4N (P_MI_CC1N + 3)
 #define P_MI_CC2 (P_MI_CC1 + 1)
 #define P_MI_CC3 (P_MI_CC1 + 2)
-#define NPROG 192u                              /* (0.6: 129-160 DX · 0.9: 161-176 STRINGS · 0.19: 177-184 SAMPLER · 0.30: 185-192 MIDI) */
+/* (0.31, Sven 20.11.: "Rhodes und Wurli") E-PIANO: the patch is full, so its knobs live on the synth drums' bytes (an
+ * e-piano never plays a kit) – the model on the 808's LENGTH byte (two values) */
+#define P_EP_MODEL P_B_GATE                     /* TINE (the suitcase's tines) · REED (the electric reed piano) */
+#define P_EP_TONE P_K_TUNE                      /* the hammer: how much the tine / reed is struck into overtones */
+#define P_EP_BARK P_K_PUNCH                     /* the pickup: its bend into growl when played hard */
+#define P_EP_BELL P_K_DECAY                     /* TINE: the bell on the attack · REED: the bite */
+#define P_EP_DECAY P_K_DRIVE                    /* how long a held note rings */
+#define P_EP_TREM P_S_TUNE                      /* tremolo depth */
+#define P_EP_RATE P_S_TONE                      /* tremolo rate */
+#define P_EP_DRIVE P_S_DECAY                    /* the amp's preamp */
+#define P_EP_NOISE P_S_SNAP                     /* the hammer's thump and the key's noise */
+#define P_EP_VELO P_C_SPREAD                    /* how much the touch matters */
+#define P_EP_STEREO P_C_TONE                    /* tremolo: 0 = the amp's (volume) .. 127 = the suitcase's (left-right) */
+#define NPROG 200u                              /* (0.6: 129-160 DX · 0.9: 161-176 STRINGS · 0.19: 177-184 SAMPLER · 0.30: 185-192 MIDI · 0.31: 193-200 E-PIANO) */
 #define NPROG_06 128u                              /* 1-16 kits (DRUMS), 17-32 BASS, 33-64 MEL, 65-128 SYNTH (OberVave's 64); the user's saves over them */
-enum { T_DRUMS, T_BASS, T_MEL, T_SYNTH, T_DX, T_STR, T_SMP, T_MIDI, NTYPE };
-static const char *const TYPE_NAME[NTYPE] = {"DRUMS", "BASS", "MEL", "OBERVAVE", "DX", "STRINGS", "SAMPLER", "MIDI"};   /* (Sven 14.11.: the kind is called what it is) */
+enum { T_DRUMS, T_BASS, T_MEL, T_SYNTH, T_DX, T_STR, T_SMP, T_MIDI, T_EP, NTYPE };   /* (append only: P_TYPE is saved) */
+static const char *const TYPE_NAME[NTYPE] = {"DRUMS", "BASS", "MEL", "OBERVAVE", "DX", "STRINGS", "SAMPLER", "MIDI", "E-PIANO"};   /* (Sven 14.11.: the kind is called what it is) */
 #define PROG_BASS0 16u
 #define PROG_MEL0 32u
 #define PROG_SYNTH0 64u
@@ -79,8 +92,9 @@ static const char *const TYPE_NAME[NTYPE] = {"DRUMS", "BASS", "MEL", "OBERVAVE",
 #define PROG_STR0 160u
 #define PROG_SMP0 176u
 #define PROG_MIDI0 184u
-static uint32_t prog_type_dflt(uint32_t n) { return n < PROG_BASS0 ? T_DRUMS : n < PROG_MEL0 ? T_BASS : n < PROG_SYNTH0 ? T_MEL : n < PROG_DX0 ? T_SYNTH : n < PROG_STR0 ? T_DX : n < PROG_SMP0 ? T_STR : n < PROG_MIDI0 ? T_SMP : T_MIDI; }   /* a factory slot's kind */
-static uint32_t type_prog0(uint32_t ty) { return ty == T_DRUMS ? 0u : ty == T_BASS ? PROG_BASS0 : ty == T_MEL ? PROG_MEL0 : ty == T_SYNTH ? PROG_SYNTH0 : ty == T_DX ? PROG_DX0 : ty == T_STR ? PROG_STR0 : ty == T_SMP ? PROG_SMP0 : PROG_MIDI0; }   /* its first slot */
+#define PROG_EP0 192u
+static uint32_t prog_type_dflt(uint32_t n) { return n < PROG_BASS0 ? T_DRUMS : n < PROG_MEL0 ? T_BASS : n < PROG_SYNTH0 ? T_MEL : n < PROG_DX0 ? T_SYNTH : n < PROG_STR0 ? T_DX : n < PROG_SMP0 ? T_STR : n < PROG_MIDI0 ? T_SMP : n < PROG_EP0 ? T_MIDI : T_EP; }   /* a factory slot's kind */
+static uint32_t type_prog0(uint32_t ty) { return ty == T_DRUMS ? 0u : ty == T_BASS ? PROG_BASS0 : ty == T_MEL ? PROG_MEL0 : ty == T_SYNTH ? PROG_SYNTH0 : ty == T_DX ? PROG_DX0 : ty == T_STR ? PROG_STR0 : ty == T_SMP ? PROG_SMP0 : ty == T_MIDI ? PROG_MIDI0 : PROG_EP0; }   /* its first slot */
 
 enum { K_NUM, K_BIP, K_ONOFF, K_MODE, K_LSHAPE, K_LPHASE, K_ARP, K_DIV, K_MS, K_HZ, K_PCT, K_CUT, K_OCT, K_DDIV,
        K_TYPE, K_DTYPE, K_BGATE, K_SLIDE, K_ALGO, K_RATIO, K_LVL, K_SEMI, K_WAVE, K_FTYPE, K_TO, K_MORPH, K_DXALGO, K_DXFB, K_DMODE, K_RMODE, K_KSRC, K_SMTRK, K_SMN, K_SMCHOP, K_SMQ, K_SMPOS, K_SMPM, K_SMPITCH, K_SMFINE, K_MICH, K_MIPROG, K_MIVEL };
@@ -330,9 +344,12 @@ static uint32_t drum_of_note(uint32_t n)        /* GM's drum notes where they ar
 typedef struct { const char *title; int16_t p[4]; } page_t;
 #define PS_CUT 400                              /* (0.21) the SAMPLER's CHOP page: knobs that are no parameters – the chosen cut, moving it */
 #define PS_MOVE 401   /* (0.9: int16 – the parameters went past 127) */
+#define PS_GAIN 402                             /* (0.31) SHIFT on the SAMPLER's EDIT page: its input's GAIN */
+#define PS_THR 403                              /*        and its THRESHOLD */
+#define PS_REV 404                              /*        and REVERSE (F4 is TRIM now) */
 enum { PG_PERFORM, PG_S1, PG_S2, PG_S3, PG_S4, PG_S5, PG_S6, PG_S7, PG_FENV, PG_AENV, PG_LFO, PG_LFODEST, PG_ARP,
        PG_CHORUS, PG_DELAY, PG_REVERB, PG_DRIVE, PG_OUTPUT, PG_GLOBAL, PG_SCALE, PG_MIXER, PG_SEQ, NPAGE };
-static const uint8_t SND_N[NTYPE] = {8, 6, 8, 7, 4, 4, 4, 3};   /* SOUND's pages per kind (TYPE comes after them) */
+static const uint8_t SND_N[NTYPE] = {8, 6, 8, 7, 4, 4, 4, 3, 6};   /* SOUND's pages per kind (TYPE comes after them) */
 #define SND_N_AC 6u                             /* the acoustic kit's pages: SPAGE[NTYPE] */
 static const page_t SPAGE[NTYPE + 1u][10] = {
     {   /* DRUMS */
@@ -415,6 +432,17 @@ static const page_t SPAGE[NTYPE + 1u][10] = {
         {"CC NUMBERS", {P_MI_CC1N, P_MI_CC2N, P_MI_CC3N, P_MI_CC4N}},
         {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
         {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
+    },
+    {   /* (0.31) E-PIANO: tines or reeds, the pickup, the tremolo (labels: ep_label in o3_pages.h) */
+        {"PERFORM", {P_EP_TONE, P_EP_BARK, P_EP_TREM, P_EP_DECAY}},
+        {"PIANO", {P_EP_MODEL, P_EP_TONE, P_EP_BELL, P_EP_NOISE}},
+        {"PICKUP", {P_EP_BARK, P_EP_DRIVE, P_EP_VELO, P_VOLUME}},
+        {"TREMOLO", {P_EP_TREM, P_EP_RATE, P_EP_STEREO, -1}},
+        {"FILTER", {P_CUTOFF, P_RESO, P_FENV_AMT, P_LFO_FLT}},
+        {"VOICE", {P_MODE, P_GLIDE, P_BEND, P_VOLUME}},
+        {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
+        {"FILTER ENV", {P_FA, P_FD, P_FS, P_FR}},
+        {"AMP ENV", {P_AA, P_EP_DECAY, P_AR, -1}},
     },
     {   /* (0.13) DRUMS with the acoustic kit: each drum's tune and decay */
         {"PERFORM", {P_K_DECAY, P_S_DECAY, P_OH_DECAY, P_CUTOFF}},

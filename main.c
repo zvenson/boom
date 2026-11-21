@@ -284,7 +284,7 @@ void vibe_on_init(float sr)
     au_boot();                                  /* (3.7) the audio tracks: their settings, their takes from the card */
     scope_state = 1;
     splash_unpack();
-    vibe_log("BOOM 0.30 (native VIBE, 8 tracks, DX7 and STRINGS kinds, drum grid, delay and reverb modes, tube amp insert, own outputs, DAW mode)");
+    vibe_log("BOOM 0.31 (native VIBE, 8 tracks, DX7, STRINGS and E-PIANO kinds, drum grid, delay and reverb modes, tube amp insert, own outputs, DAW mode)");
 }
 
 static void leave_seq_edit(void) { step_held = -1; audition_off(); entry_reset(); }
@@ -402,6 +402,7 @@ static void button(int id, int down)
         if (files_on && !menu) { files_enter(); break; }   /* (3.7) FILES: do it */
         if (in_seq() && seq_view == SV_TRACKS && !menu && !f5_down) { au_type_toggle(sel); break; }
         if (page == PG_S1 && trk_type(sel) == T_SMP && !in_seq() && !menu && !f5_down) { if (shift) sm_cut_del(sel); else sm_cut_add(sel); break; }   /* (0.21) CHOP by hand */
+        if (id == VB_DATA_PUSH && in_seq() && SV_ENTRY(seq_view) && !menu && !f5_down && !au_is(sel)) { step_toggle(); break; }   /* (0.32) DATA: the cursor's step on / off */
         if (in_seq() && seq_view == SV_STEPS && !menu && !f5_down && !au_is(sel) && !drum_grid()) { roll_fold = !roll_fold; say(roll_fold ? "FOLD: ONLY THE NOTES USED" : "ALL KEYS"); break; }   /* (0.16) the piano roll: FOLD */   /* (3.7) TRACKS: SYNTH <-> AUDIO */
         if (f5_down) { randomize(); f5_used = 1; save_armed = 0; say("NEW SOUND"); }
         else if (shift && page == PG_GLOBAL) reset_ask = 1;
@@ -465,11 +466,12 @@ static void encoder(int id, float v)
     } else if (id == VE_B) {
         prog_step(s);                           /* the track's preset, everywhere (6.11.2026: the note is encoder 2 in STEPS, TRANSP encoder 4 in TRACK) */
     } else if (id == VE_DATA) {
-        if (save_armed) { save_to = (uint32_t)(((int32_t)save_to + s + (int32_t)NPROG * 4) % (int32_t)NPROG); save_t = o3_ms; }
+        if (save_armed) { save_to = prog_step_type(save_to, s > 0 ? 1 : -1, trk_type(sel)); save_t = o3_ms; }   /* (0.31) only the slots of the track's kind: a bass never lands between the kits */
         else if (page == PG_GLOBAL) {           /* (3.1) MIDI OUT on / off */
             uint32_t was = set.midi_out; set.midi_out = s > 0;
             if (was != set.midi_out) { set_touch(); say(set.midi_out ? "MIDI OUT ON" : "MIDI OUT OFF"); if (!set.midi_out) { ctl_panic = 1; } }
         }
+        else if (in_seq() && SV_ENTRY(seq_view) && !au_is(sel) && !shift) step_cursor_turn(s);   /* (0.32) STEPS: DATA moves the cursor */
         else { int c = coarse(s); if (c) pat_go((uint32_t)(((int)(pat_queue ? pat_queue - 1u : set.pat) + c + (int)NPAT) % (int)NPAT)); }   /* the pattern, everywhere (6.11.2026) */
     }
 }
@@ -641,7 +643,7 @@ static void group_chips(void)                   /* the colour key's pages, the o
     for (uint32_t i = 0; i < n; i++) {
         uint32_t pg = grp->key == 6 ? F6P[i] : grp->first + i, on = pg == page, col = grp->key < 6 ? KEY_RGB[grp->key] : 0xFF3D6E;
         vg_round(CX0 + (int)i * w, 41, w - 6, 26, 5, on ? col : CELL);
-        vg_text(PG(pg)->title, CX0 + (int)i * w + (w - 6) / 2, 46, w > 100 ? VG_MED : VG_BOLD, on ? 0x0E0624 : DIM, VG_CENTER);
+        vg_text(PG(pg)->title, CX0 + (int)i * w + (w - 6) / 2, 46, w > 100 ? VG_MED : VG_BOLD, on ? 0x000000 : DIM, VG_CENTER);
     }
 }
 static void sound_chips(void)                   /* (3.7) SOUND's pages and TYPE; an audio track: AUDIO, TAKE, TYPE */
@@ -653,7 +655,7 @@ static void sound_chips(void)                   /* (3.7) SOUND's pages and TYPE;
         uint32_t pg = i ? i - 1u : 0u;          /* (PERFORM, TYPE, then the kind's pages) */
         int on = au ? sx == i + 1u : i == 1u ? sx == SX_TYPE : !sx && page == PG_PERFORM + pg;
         vg_round(CX0 + (int)i * w, 41, w - 6, 26, 5, on ? KEY_RGB[CK_SOUND] : CELL);
-        vg_text(au ? AUN[i] : i == 1u ? "TYPE" : PG(PG_PERFORM + pg)->title, CX0 + (int)i * w + (w - 6) / 2, 46, VG_SMALL, on ? 0x0E0624 : DIM, VG_CENTER);
+        vg_text(au ? AUN[i] : i == 1u ? "TYPE" : PG(PG_PERFORM + pg)->title, CX0 + (int)i * w + (w - 6) / 2, 46, VG_SMALL, on ? 0x000000 : DIM, VG_CENTER);
     }
 }
 static void sound_tags(void);
@@ -683,7 +685,7 @@ static void sound_tags(void)
         vg_text(h, 240, 214, VG_MED, DIM, VG_CENTER);
         return;
     }
-    if (ty == T_DRUMS) scat(b, pv->v[P_KIT_SRC] == 2u ? "HIP HOP KIT · 8 DRUMS · PADS 9-16" : pv->v[P_KIT_SRC] ? "ACOUSTIC KIT · 8 DRUMS · PADS 9-16" : "KIT · 8 DRUMS · PADS 9-16");
+    if (ty == T_DRUMS) scat(b, pv->v[P_KIT_SRC] == 2u ? "HIP HOP KIT · PADS 9-16 · SHIFT: LEVELS" : pv->v[P_KIT_SRC] ? "ACOUSTIC KIT · PADS 9-16 · SHIFT: LEVELS" : "KIT · 8 DRUMS · PADS 9-16 · SHIFT: LEVELS");   /* (0.31) */
     else if (ty == T_BASS) { scat(b, "808 · MONO · SLIDE "); scat(b, BSLIDE_NAME[pv->v[P_B_SLIDE] & 1u]); scat(b, " · "); scat(b, BGATE_NAME[pv->v[P_B_GATE] & 1u]); if (pv->v[P_B_DRIVE]) { scat(b, " · "); scat(b, BDT_NAME[pv->v[P_B_DTYPE] % NBDT]); } }
     else if (ty == T_DX) { scat(b, "DX7 · ALGO "); fmt_u(b + slen(b), (pv->v[P_DX_ALGO] ? pv->v[P_DX_ALGO] - 1u : pv->dx[134] & 31u) + 1u); scat(b, " · "); scat(b, pv->v[P_MODE] == M_MONO ? "MONO" : "POLY"); }
     else if (ty == T_MIDI) {                    /* (0.30) */
@@ -697,6 +699,7 @@ static void sound_tags(void)
         if (sm_n[sel % NPART]) { scat(b, mode ? "" : "PLAY · "); if (mode) { fmt_u(b + slen(b), sm_n[sel % NPART]); scat(b, " SLICES · "); } scat(b, SMQ_NAME[pv->v[P_SM_QUAL] & 3u]); if (src) { scat(b, " · "); scat(b, SMTRK_NAME[src]); } }
         else scat(b, src ? "NO TAKE ON THAT TRACK" : "NO SAMPLE YET · REC RECORDS ONE");
     }
+    else if (ty == T_EP) { scat(b, pv->v[P_EP_MODEL] & 1u ? "E-PIANO · REED" : "E-PIANO · TINE"); if (pv->v[P_EP_TREM]) scat(b, pv->v[P_EP_STEREO] > 63u ? " · STEREO TREMOLO" : " · TREMOLO"); scat(b, " · "); scat(b, pv->v[P_MODE] == M_MONO ? "MONO" : "POLY"); }
     else if (ty == T_STR) { scat(b, "STRING ENSEMBLE · "); scat(b, pv->v[P_ST_ENS] ? "ENSEMBLE ON" : "DRY"); scat(b, " · "); scat(b, pv->v[P_MODE] == M_MONO ? "MONO" : "POLY"); }
     else if (ty == T_SYNTH) { scat(b, "OBERVAVE · "); scat(b, MODE_NAME[pv->v[P_MODE] & 3u]); scat(b, " · "); scat(b, FTYPE_NAME[pv->v[P_FTYPE] % NFTYPE]); }
     else { scat(b, "FM 4-OP · ALGO "); fmt_u(b + slen(b), pv->v[P_ALGO] % NALGO + 1u); scat(b, " · "); scat(b, pv->v[P_MODE] == M_MONO ? "MONO" : "POLY"); }
@@ -757,7 +760,7 @@ static void save_banner(void)
     if (o3_ms - save_t > 3000u) { save_armed = 0; return; }
     vg_round(70, 190, 340, 84, 8, 0x3A0C40);
     vg_text("SAVE HERE?", 240, 196, VG_MED, ACCENT, VG_CENTER);
-    fmt_u(b, save_to + 1u); scat(b, "  "); prog_name(save_to, n); scat(b, n);
+    b[0] = 0; scat(b, TYPE_NAME[trk_type(sel)]); scat(b, " "); fmt_u(b + slen(b), prog_num(save_to)); scat(b, "  "); prog_name(save_to, n); scat(b, n);   /* (0.31: the kind's own numbers) */
     vg_text(b, 240, 218, VG_BIG, FG, VG_CENTER);
     vg_text("DATA: another slot · F5 (TAP): save", 240, 252, VG_MED, DIM, VG_CENTER);
 }
@@ -785,10 +788,10 @@ static void link_say(void)
     if (page == PG_MIXER) mixer_knobs(k); else if (sq) seq_knobs(k); else if (snd_view()) snd_knobs(snd_view(), k); else if (page == PG_SCALE) scale_knobs(k); else page_knobs(k);
     for (int i = 0; i < 4; i++) if (k[i].label) vibe_link_encoder(VE_1 + i, k[i].label, k[i].value);
     { char l[2] = {(char)('A' + sel), 0}; vibe_link_encoder(VE_A, "TRACK", l); }
-    { char b[24], nm[PATCH_NAME + 1]; uint32_t j = 0, q = 0; fmt_u(b, trk_prog[sel] + 1u); prog_name(trk_prog[sel], nm);
+    { char b[24], nm[PATCH_NAME + 1]; uint32_t j = 0, q = 0; fmt_u(b, prog_num(trk_prog[sel])); prog_name(trk_prog[sel], nm);
       while (b[j]) j++; b[j++] = ' '; while (nm[q] && j < sizeof b - 1) b[j++] = nm[q++]; b[j] = 0;
       vibe_link_encoder(VE_B, "SOUND", b); }
-    vibe_link_encoder(VE_DATA, shift ? "TEMPO" : save_armed ? "SLOT" : sq && SV_ENTRY(seq_view) ? "BAR" : sq || page == PG_MIXER ? "PATTERN" : page == PG_GLOBAL ? "MIDI OUT" : "PATCH", "");
+    vibe_link_encoder(VE_DATA, shift ? "TEMPO" : save_armed ? "SLOT" : sq && SV_ENTRY(seq_view) && !au_is(sel) ? "STEP" : sq || page == PG_MIXER ? "PATTERN" : page == PG_GLOBAL ? "MIDI OUT" : "PATCH", "");
 }
 void vibe_on_draw(uint16_t *fb)
 {

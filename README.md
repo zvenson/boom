@@ -23,6 +23,7 @@ AU) and the browser run the same `.wasm`. Its controls, sequencer, mixer, effect
 | **OBERVAVE** | the analog poly synth with its 64 sounds |
 | **DX** | a DX7 voice (6 operators, 32 algorithms) under four macros; loads `.syx` banks from the card |
 | **STRINGS** | a string ensemble: 16' / 8' / 4' registers through a three-line chorus |
+| **E-PIANO** | an electric piano: struck tines or reeds, a pickup that barks when played hard, preamp, mono or stereo tremolo |
 | **SAMPLER** | record or load a sample, play it in tune or chop it into slices (even or on the hits), four quality steps from clean to lo-fi |
 | **MIDI** | silent – the track's notes, program and four CCs go out to an external synth |
 | **AUDIO** | takes per pattern from IN 1 / IN 2 – or up to 16 inputs of an interface, armed and recorded at once (multitrack) |
@@ -31,6 +32,11 @@ AU) and the browser run the same `.wasm`. Its controls, sequencer, mixer, effect
 
 - 64 patterns, 8 tracks, up to 256 steps a track, its own length, meter, swing and quantise; tracks start and stop on the bar.
 - **Drum grid** – a row for each drum, velocity and rolls per hit. **Piano roll** – 12 pitch rows, FOLD shows only the notes in use.
+- **STEPS**: a strip shows the whole track above the bar being edited; DATA moves the cursor, a push sets or clears the step.
+- **TRACK**: every track as a time line – notes where they play, how high and how long, the beats and bars behind them;
+  an audio track's wave on the same grid.
+- **TIME**: a track without bars – record notes or audio freely, REC closes the loop, START / END snap onto the beats.
+- Mixer EQ per track (LOW / MID / HIGH). SAMPLER: TRIM cuts away what lies outside START–END, NORMALIZE, a recording threshold.
 - Mixer rows LEVEL · FX · PAN · DELAY · REVERB · CHORUS · DRIVE · MASTER. Delay ANALOG / DIGITAL / TAPE, reverb HALL / ROOM / PLATE,
   drive OVERDRIVE / DIST / FUZZ / CRUSH or a **tube amp** as an insert on any track.
 - Master FX on the sum: FILTER (low-pass / high-pass), CRUSH, DUB (a self-oscillating tape echo on one knob), REPEAT.

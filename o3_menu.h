@@ -14,7 +14,7 @@ static void overview(void)
 {
     knob_t k[4];
     char t[40];
-    vg_rect(0, 0, VIBE_SCREEN_W, VIBE_SCREEN_H, 0x0E0624);
+    vg_rect(0, 0, VIBE_SCREEN_W, VIBE_SCREEN_H, 0x000000);
     vg_text("CONTROLS", 10, 6, VG_MED, ACCENT, VG_LEFT);
     t[0] = 0; scat(t, in_seq() ? SV_NAME[SV_EFF] : PG(page)->title); scat(t, " · TRACK "); { char l[2] = {(char)('A' + sel), 0}; scat(t, l); }
     vg_text(t, 104, 9, VG_SMALL, FG, VG_LEFT);
@@ -33,12 +33,12 @@ static void overview(void)
         int x = 236 + i * 40, on = (sq ? CK_SEQ : key_lit()) == i;
         if (shift || k_lock) {                  /* (3.10) SHIFT + K (RETURN: locked): the scale's notes / chords */
             char nm[8]; sc_name(nm, (uint32_t)i);
-            vg_round(x, 122, 37, 40, 4, vg_mix(0x0E0624, TRK_RGB[sel], i ? 0.45f : 0.8f));
+            vg_round(x, 122, 37, 40, 4, vg_mix(0x000000, TRK_RGB[sel], i ? 0.45f : 0.8f));
             vg_text(nm, x + 18, 136, VG_BOLD, FG, VG_CENTER);
             continue;
         }
-        vg_round(x, 122, 37, 40, 4, on ? KEY_RGB[i] : vg_mix(0x0E0624, KEY_RGB[i], 0.45f));
-        vg_text(KEY_NAME[i], x + 18, 136, VG_BOLD, on ? 0x0E0624 : FG, VG_CENTER);
+        vg_round(x, 122, 37, 40, 4, on ? KEY_RGB[i] : vg_mix(0x000000, KEY_RGB[i], 0.45f));
+        vg_text(KEY_NAME[i], x + 18, 136, VG_BOLD, on ? 0x000000 : FG, VG_CENTER);
     }
     ov_cell(6, 170, 112, 40, "A", entry ? (seq_view == SV_SLOTS ? "SLOT" : "STEP ◀ ▶") : "TRACK A–H", "", GREEN);
     ov_cell(122, 170, 112, 40, "B", sq && seq_view == SV_STEPS && !shift ? "NOTE UP/DOWN" : sq && seq_view == SV_TRACK ? "TRANSPOSE" : "PATCH",
@@ -59,7 +59,7 @@ static void overview(void)
             int y = 188 + r * 32;
             for (int c = 0; c < 4; c++) {
                 uint32_t col = st ? KEY_RGB[CK_SEQ] : (mx ? r == 3 : r == 1) ? TRK_RGB[col_trk((uint32_t)c)] : r == 0 ? (rec ? RED : GREEN) : mx ? RED : DIM;
-                vg_round(242 + c * 26, y, 22, 26, 3, vg_mix(0x0E0624, col, 0.55f));
+                vg_round(242 + c * 26, y, 22, 26, 3, vg_mix(0x000000, col, 0.55f));
             }
             vg_text(st ? SROWS[r] : mx ? MROWS[r] : tr ? TROWS[r] : (r == 0 && rec) ? "RECORD" : ROWS[r], 350, y + 7, VG_SMALL, FG, VG_LEFT);
         }

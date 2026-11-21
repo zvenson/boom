@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* OberVave 3 – the display, 480 x 320, drawn for VIBE (the style of GROOVE and the VIBE pages of 2.0): a header,
  * the page over the full width, the soft keys below */
-#define BG 0x0E0624   /* (BOOM: neon on deep violet – not OberVave's grey-blue) */
+#define BG 0x000000   /* (0.32, Sven: "so dunkel wie möglich" – black; before: deep violet 0x0E0624) */
 #define FG 0xF6F0FF
 #define DIM 0xB79BE0
 #define MUTED 0x7458A8
-#define CELL 0x1C0B3A
-#define CELL2 0x351763
-#define SEP 0x2C1354
+#define CELL 0x120726
+#define CELL2 0x2A1250
+#define SEP 0x22103F
 #define RED 0xFF3D6E
 #define GREEN 0x2BFFB4
 #define ACCENT 0xFF2E97
@@ -59,11 +59,11 @@ static void knobs_row(const knob_t *k, int y, uint32_t col)
 
 static void softkeys(const char *const *f, uint32_t on_mask)
 {
-    vg_rect(0, 282, VIBE_SCREEN_W, 38, 0x14072E);
+    vg_rect(0, 282, VIBE_SCREEN_W, 38, 0x08030F);
     for (int i = 0; i < 6; i++) {
         int x = 40 + i * 80, on = on_mask >> i & 1u;
         vg_round(x - 37, 286, 74, 30, 5, on ? ACCENT : CELL2);
-        vg_text(f[i], x, 293, VG_MED, on ? 0x0E0624 : FG, VG_CENTER);
+        vg_text(f[i], x, 293, VG_MED, on ? 0x000000 : FG, VG_CENTER);
         vibe_label(VB_F1 + i, f[i]);
     }
     for (int i = 0; i < 6; i++) vibe_label(VB_K1 + i, KEY_NAME[i]);   /* (SHIFT held: main.c names them by the scale) */
@@ -118,7 +118,7 @@ static void header(const char *title, uint32_t title_rgb)
         fmt_u(b, live_p[sel].v[P_MI_CH] % 16u + 1u); { char m[16] = "MIDI · CH "; scat(m, b); vg_text(m, 272, 8, VG_MED, TRK_RGB[sel], VG_LEFT); }
     }
     else {
-        fmt_u(b, trk_prog[sel] + 1u); prog_name(trk_prog[sel], n);
+        fmt_u(b, prog_num(trk_prog[sel])); prog_name(trk_prog[sel], n);
         vg_text(b, 282, 8, VG_MED, TRK_RGB[sel], VG_RIGHT);
         vg_text(n, 287, 8, VG_MED, trk_edited[sel] ? ACCENT : FG, VG_LEFT);
     }
@@ -134,5 +134,5 @@ static void toast_draw(void)
     if (!toast || o3_ms - toast_t > 1500u) return;
     int w = vg_text_width(toast, VG_MED) + 32;
     vg_round(240 - w / 2, 234, w, 32, 6, ACCENT);
-    vg_text(toast, 240, 241, VG_MED, 0x0E0624, VG_CENTER);
+    vg_text(toast, 240, 241, VG_MED, 0x000000, VG_CENTER);
 }

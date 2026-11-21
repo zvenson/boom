@@ -42,6 +42,8 @@ static uint32_t psnd_ser(const psnd_t *s, uint8_t *b)
                                        s->mx.tempo, s->mx.mfx[0], s->mx.mfx[1], s->mx.mfx[2], s->mx.mfx[3], s->mx.mfx_ok};
         memcpy(b + at, sc, BMF_NSCAL); at += BMF_NSCAL;
     }
+    b[at++] = 'E'; b[at++] = (uint8_t)NTRK; b[at++] = 5u;   /* (0.31) the EQ block: tracks · values per track */
+    for (uint32_t t = 0; t < NTRK; t++) { memcpy(b + at, s->mx.eq[t], 5u); at += 5u; }
     return at;
 }
 static int psnd_des(const uint8_t *b, uint32_t len, psnd_t *s)   /* 0: read (this format, or 0.3's raw struct) */
@@ -69,6 +71,14 @@ static int psnd_des(const uint8_t *b, uint32_t len, psnd_t *s)   /* 0: read (thi
             uint8_t *const d[BMF_NSCAL] = {&s->mx.mute, &s->mx.solo, &s->mx.dv_type, &s->mx.dv_amt, &s->mx.dv_tone, &s->mx.dv_mix, &s->mx.m_vol, &s->mx.m_dj, &s->mx.m_drive, &s->mx.m_comp,
                                            &s->mx.tempo, &s->mx.mfx[0], &s->mx.mfx[1], &s->mx.mfx[2], &s->mx.mfx[3], &s->mx.mfx_ok};
             for (uint32_t i = 0; i < ns && i < BMF_NSCAL; i++) *d[i] = b[at + i];
+        }
+        at += ns;
+        for (uint32_t t = 0; t < NTRK; t++) { s->mx.eq[t][0] = s->mx.eq[t][1] = s->mx.eq[t][2] = s->mx.eq[t][3] = 64; s->mx.eq[t][4] = 0; }   /* (0.31: a set from before the EQ – flat) */
+        if (len >= at + 3u && b[at] == 'E') {
+            uint32_t ne = b[at + 1], nb = b[at + 2];
+            at += 3u;
+            if (len >= at + ne * nb)
+                for (uint32_t t = 0; t < NTRK && t < ne; t++) for (uint32_t i = 0; i < 5u && i < nb; i++) s->mx.eq[t][i] = b[at + t * nb + i] & 127u;
         }
         if (nt < NTRK) { uint32_t m = (1u << nt) - 1u; s->mx.mute &= (uint8_t)m; s->mx.solo &= (uint8_t)m; }
     }

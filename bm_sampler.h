@@ -163,6 +163,55 @@ static void sm_wave(const int16_t *d, uint32_t st, uint32_t x0, uint32_t x1, uin
     }
 }
 static int sm_x(uint32_t f, uint32_t x0, uint32_t x1, int X, int Wd) { return f < x0 || f > x1 || x1 <= x0 ? -1 : X + (int)((uint64_t)(f - x0) * (uint32_t)Wd / (x1 - x0)); }
+static void smp_src_name(char *s, uint32_t src);
+static uint8_t *smp_gain_ref(void)              /* (0.31) IN 1 / IN 2's GAIN (dB 0..40) – an interface's IN 3.. has none here */
+{
+    int ii = au_src_in(AU.src[sel % NAU]);
+    return ii == 0 || ii == 1 ? &set.au_gain[ii] : 0;
+}
+static void smp_meter(int X, int Y, int W)      /* (0.31, Sven: "man sieht keine Aussteuerung") the input it records: level, peak, CLIP, the threshold */
+{
+    static float hold; static uint32_t hold_t, clip_t;
+    int ii = au_src_in(AU.src[sel % NAU]);
+    float lv = ii >= 0 ? lvl_ins[ii % VIBE_IO_MAX] : (lvl_l > lvl_r ? lvl_l : lvl_r);   /* (RESAMPLE: what you hear) */
+    float db = lv > 0.000001f ? 6.0206f * vd_log2(lv) : -90.0f, x;
+    char t[24], s[12];
+    au_inputs();                                /* (the input on while this page is open) */
+    if (lv >= hold || o3_ms - hold_t > 1200u) { hold = lv; hold_t = o3_ms; }
+    if (lv > 0.98f) clip_t = o3_ms;
+    vg_rect(X, Y, W, 10, 0x10081E);
+    x = (db + 60.0f) / 60.0f; if (x < 0.0f) x = 0.0f; if (x > 1.0f) x = 1.0f;
+    vg_rect(X, Y, (int)(x * (float)W), 10, db > -1.0f ? RED : db > -12.0f ? 0xFFE14D : GREEN);
+    { float hd = hold > 0.000001f ? 6.0206f * vd_log2(hold) : -90.0f, hx = (hd + 60.0f) / 60.0f; if (hx > 0.0f && hx <= 1.0f) vg_rect(X + (int)(hx * (float)W) - 1, Y, 2, 10, FG); }
+    for (int m = -48; m <= 0; m += 12) vg_rect(X + (m + 60) * W / 60, Y + 10, 1, 3, MUTED);
+    if (set.smp_thr[sel % 8u]) { int tx = X + (int)((float)(60 - (55 - (int)set.smp_thr[sel % 8u])) / 60.0f * (float)W); vg_rect(tx - 1, Y - 3, 2, 16, ACCENT); }
+    s[0] = 0; smp_src_name(s, AU.src[sel % NAU]); t[0] = 0; scat(t, s); scat(t, db > -60.0f ? "  " : "  –"); if (db > -60.0f) { scat(t, "-"); fmt_u(t + slen(t), (uint32_t)(db < 0.0f ? -db + 0.5f : 0.0f)); scat(t, " dB"); }
+    vg_text(t, X, Y - 16, VG_SMALL, DIM, VG_LEFT);
+    vg_text(o3_ms - clip_t < 1500u ? "CLIP – LESS GAIN (SHIFT + 1)" : set.smp_thr[sel % 8u] ? "THRESHOLD: START ON THE FIRST HIT" : "SHIFT + 1 GAIN · + 2 THRESHOLD", X + W, Y - 16, VG_SMALL, o3_ms - clip_t < 1500u ? RED : MUTED, VG_RIGHT);
+}
+static void smp_after_take(uint32_t t)          /* (0.31) a new sample: with a THRESHOLD, START on its first hit (5 ms before), END after its last */
+{
+    uint32_t hi = 0, st = 0, a = 0, b = 0, thr, i, p = t % 8u;
+    const int16_t *d;
+    if (trk_type(t) != T_SMP || !set.smp_thr[p]) return;
+    d = sm_take(sm_src(p), &hi, &st);
+    if (!d || hi < 2048u) return;
+    thr = (uint32_t)(32768.0f * vd_exp2(-(float)(55u - set.smp_thr[p]) / 6.0206f));
+    for (i = 0; i < hi; i++) { int v = st ? (d[2u * i] + d[2u * i + 1u]) / 2 : d[i]; if ((uint32_t)(v < 0 ? -v : v) > thr) break; }
+    if (i >= hi) { say("THRESHOLD: NOTHING THAT LOUD CAME IN"); return; }
+    a = i > obv_fs / 200u ? i - obv_fs / 200u : 0u;
+    for (i = hi; i > a; i--) { int v = st ? (d[2u * (i - 1u)] + d[2u * (i - 1u) + 1u]) / 2 : d[i - 1u]; if ((uint32_t)(v < 0 ? -v : v) > thr) break; }
+    b = i + obv_fs / 4u < hi ? i + obv_fs / 4u : hi;   /* (its last hit + 250 ms of its tail) */
+    {
+        uint32_t s14 = (uint32_t)((uint64_t)a * 16383u / hi), e14 = (uint32_t)((uint64_t)b * 16383u / hi);
+        live_p[t].v[P_SM_ST_C] = (uint8_t)(s14 >> 7); live_p[t].v[P_SM_ST_F] = (uint8_t)(s14 & 127u);
+        live_p[t].v[P_SM_EN_C] = (uint8_t)(e14 >> 7); live_p[t].v[P_SM_EN_F] = (uint8_t)(e14 & 127u);
+        trk_edited[t % NTRK] = 1; sm_auto(t);
+    }
+    {
+        static char m[48]; m[0] = 0; scat(m, "THRESHOLD: START "); fmt_secs(m + slen(m), a); say(m);
+    }
+}
 static void smp_draw(const knob_t *k)
 {
     uint32_t p = sel % 8u, a = 0, b = 0, hi = 0, st = 0, c = TRK_RGB[sel], x0, x1;
@@ -180,7 +229,7 @@ static void smp_draw(const knob_t *k)
     } else if (!sm_region(p, &a, &b, &hi)) {
         vg_rect(X, Y, Wd, Hh, CELL);
         vg_text(sm_src(p) == p ? "EMPTY · NO SAMPLE YET" : "NO TAKE ON THE SOURCE TRACK", 240, Y + 36, VG_BIG, MUTED, VG_CENTER);
-        vg_text("REC records IN 1 (F2: the input)  ·  F1 LOAD a WAV", 240, Y + 80, VG_MED, DIM, VG_CENTER);
+        { char b[64], s[12]; s[0] = 0; smp_src_name(s, AU.src[sel % NAU]); b[0] = 0; scat(b, "REC records "); scat(b, s); scat(b, " (F2: the input)  ·  F1 LOAD a WAV"); vg_text(b, 240, Y + 80, VG_MED, DIM, VG_CENTER); }   /* (0.31: the input it really takes) */
     } else if (!chop) {                         /* EDIT: the whole sample, START green, END red; turning one: zoomed to it */
         x0 = 0; x1 = hi;
         if (o3_ms - sm_turn_t < 1500u) {
@@ -224,6 +273,16 @@ static void smp_draw(const knob_t *k)
         for (uint32_t v = card_lo(p); v < card_lo(p) + NCARD && x1 > x0; v++)
             if (vc[v].type == T_SMP && !vc[v].sm_done) { int x = sm_x(vc[v].sm_i, x0, x1, X, Wd); if (x >= 0) vg_rect(x, Y, 1, Hh, 0xFFFFFF); }
     }
+    if (!chop) smp_meter(X + 8, Y + Hh - 16, Wd - 16);   /* (0.31) the input's level on EDIT, always */
+    if (!rec_here && sm_src(p) == sel % NTRK) {   /* (0.31, Sven: "man sollte sehen wie das Sample heißt") its name – or that it is in memory only */
+        uint32_t kk = au_k(sel);
+        if (kk) {
+            char nm[40]; const char *pth = takes2.e[kk].path, *bn = pth;
+            for (const char *q = pth; *q; q++) if (*q == '/') bn = q + 1;
+            if ((tk_unsaved >> (kk - 1u) & 1u) || !*bn) vg_text("NEW SAMPLE · NOT SAVED (SAVE > AUDIO)", X + 6, Y + 4, VG_SMALL, RED, VG_LEFT);
+            else { uint32_t j = 0; while (bn[j] && j < 36u) { nm[j] = bn[j]; j++; } nm[j] = 0; if (j > 4u && nm[j - 4u] == '.') nm[j - 4u] = 0; vg_text(nm, X + 6, Y + 4, VG_SMALL, FG, VG_LEFT); }
+        }
+    }
     {   /* the line under the wave: what it is */
         char t[64]; const uint8_t *v = live_p[sel].v;
         t[0] = 0; scat(t, SMCHOP_NAME[v[P_SM_CHOP] % 3u]); scat(t, " · "); scat(t, SMPM_NAME[v[P_SM_PMODE] % 3u]);
@@ -240,15 +299,86 @@ static void smp_draw(const knob_t *k)
         vg_text(k[i].value, cx, 242, VG_BIG, FG, VG_CENTER);
     }
 }
+static void smp_src_name(char *s, uint32_t src)  /* (0.31) every source named – IN 3 .. 16 were blank */
+{
+    int ii = au_src_in(src);
+    if (ii < 0) { scat(s, "RESAMP"); return; }
+    scat(s, "IN "); fmt_u(s + slen(s), (uint32_t)ii + 1u);
+}
+static uint32_t smp_src_next(uint32_t src)      /* (0.31) F2: IN 1 → IN 2 → (IN 3 .. as many as the host has) → RESAMPLE – never an input that is not there */
+{
+    int n = vibe_input_count(); if (n < 2) n = 2;
+    for (uint32_t k = 1; k <= NAUSRC; k++) {
+        uint32_t c = (src + k) % NAUSRC; int ii = au_src_in(c);
+        if (ii < 0 || ii < n) return c;
+    }
+    return AU_IN1;
+}
+/* (0.31, Sven: "das Sample beschneiden, dass alles was Müll ist wirklich gelöscht ist – wie MPC 1000 / JJOS") TRIM: what lies
+ * outside START..END is cut away for good – the sample is only the part that plays, START 0 %, END 100 %, the memory free.
+ * F4 asks, F4 again (within 3 s) does it. */
+static uint32_t trim_ask_t;
+static void smp_trim(uint32_t t)
+{
+    static char m[48];
+    uint32_t p = t % 8u, a = 0, b = 0, hi = 0, k = au_k(t), ch, d;
+    int16_t *pl;
+    if (sm_src(p) != t % NTRK) { say("TRIM: ONLY ITS OWN SAMPLE (SOURCE: OWN)"); return; }
+    if (!k || !sm_region(p, &a, &b, &hi)) { say("NO SAMPLE TO TRIM"); return; }
+    if (ctl_au_rq >> (t % NAU) & 1u) { say("NOT WHILE IT RECORDS"); return; }
+    if (a == 0u && b >= hi) { say("NOTHING TO TRIM – SET START / END FIRST"); return; }
+    if (o3_ms - trim_ask_t > 3000u) { trim_ask_t = o3_ms; say("TRIM? F4 AGAIN = CUT AWAY WHAT IS OUTSIDE"); return; }
+    trim_ask_t = 0;
+    ch = tk_ch(k); pl = au_arena + tk[k].off; d = b - a;
+    tk_save_cancel(k);
+    memmove(pl, pl + (size_t)a * ch, (size_t)d * ch * sizeof(int16_t));
+    tk[k].hi = d; take_trim(k, d);
+    au_fade(t, 0, 1); au_fade(t, d, 0);         /* (no click at the new ends) */
+    if (AU.len[t % NAU] > d) AU.len[t % NAU] = d;
+    live_p[t].v[P_SM_ST_C] = 0; live_p[t].v[P_SM_ST_F] = 0; live_p[t].v[P_SM_EN_C] = 127; live_p[t].v[P_SM_EN_F] = 127;
+    trk_edited[t % NTRK] = 1; sm_auto(t);
+    aud_touch(); au_apply(); tk_save_q |= 1ull << (k - 1u);
+    m[0] = 0; scat(m, "TRIMMED · "); fmt_secs(m + slen(m), d); scat(m, " LEFT"); say(m);
+}
+/* (0.31, Sven 21.11.: "ein Sample normalize") NORMALIZE: the part that plays (START..END) up to -0.3 dB – the whole sample gets
+ * that gain (what lies outside and is louder clips: TRIM takes it away). F5 on EDIT asks, F5 again (within 3 s) does it */
+static uint32_t norm_ask_t;
+static void smp_norm(uint32_t t)
+{
+    static char m[48];
+    uint32_t p = t % 8u, a = 0, b = 0, hi = 0, k = au_k(t), ch, pk = 0, i;
+    int16_t *pl;
+    float g, db;
+    if (sm_src(p) != t % NTRK) { say("NORMALIZE: ONLY ITS OWN SAMPLE (SOURCE: OWN)"); return; }
+    if (!k || !sm_region(p, &a, &b, &hi)) { say("NO SAMPLE TO NORMALIZE"); return; }
+    if (ctl_au_rq >> (t % NAU) & 1u) { say("NOT WHILE IT RECORDS"); return; }
+    ch = tk_ch(k); pl = au_arena + tk[k].off;
+    for (i = a * ch; i < b * ch; i++) { uint32_t v = (uint32_t)(pl[i] < 0 ? -(int32_t)pl[i] : pl[i]); if (v > pk) pk = v; }
+    if (pk < 33u) { say("NORMALIZE: IT IS SILENT"); return; }
+    g = 31747.0f / (float)pk;                   /* (-0.3 dB) */
+    if (g < 1.02f && g > 0.98f) { say("ALREADY NORMALIZED"); return; }
+    db = 6.0206f * vd_log2(g);
+    if (o3_ms - norm_ask_t > 3000u) {
+        norm_ask_t = o3_ms; m[0] = 0; scat(m, "NORMALIZE "); scat(m, db < 0.0f ? "-" : "+"); fmt_u(m + slen(m), (uint32_t)(db < 0.0f ? -db + 0.5f : db + 0.5f)); scat(m, " dB? F5 AGAIN");
+        say(m); return;
+    }
+    norm_ask_t = 0;
+    tk_save_cancel(k);
+    for (i = 0; i < hi * ch; i++) { float v = (float)pl[i] * g; pl[i] = (int16_t)(v > 32767.0f ? 32767 : v < -32768.0f ? -32768 : (int)(v < 0.0f ? v - 0.5f : v + 0.5f)); }
+    trk_edited[t % NTRK] = 1; sm_ver[p]++;
+    aud_touch(); au_apply(); tk_save_q |= 1ull << (k - 1u);
+    m[0] = 0; scat(m, "NORMALIZED "); scat(m, db < 0.0f ? "-" : "+"); fmt_u(m + slen(m), (uint32_t)(db < 0.0f ? -db + 0.5f : db + 0.5f)); scat(m, " dB"); say(m);
+}
 static const char *const *smp_soft(void)
 {
     static char f[6][12]; static const char *pf[6];
     const uint8_t *v = live_p[sel].v; int chop = page == PG_S1;
-    static const char *const SRC_S[NAUSRC] = {"IN 1", "IN 2", "RESAMP"};
     for (int i = 0; i < 6; i++) { f[i][0] = 0; pf[i] = f[i]; }
-    if (!chop) { scat(f[0], "LOAD"); scat(f[1], SRC_S[AU.src[sel % NAU] % NAUSRC]); scat(f[2], SMPM_NAME[v[P_SM_PMODE] % 3u]); scat(f[3], v[P_SM_REV] ? "REV" : "FWD"); }
+    if (!chop) { scat(f[0], "LOAD"); smp_src_name(f[1], AU.src[sel % NAU]); scat(f[2], SMPM_NAME[v[P_SM_PMODE] % 3u]); scat(f[3], o3_ms - trim_ask_t < 3000u ? "TRIM ?" : "TRIM"); }   /* (0.31: F4 TRIM – REVERSE on SHIFT + knob 3) */
     else { scat(f[0], "ADD CUT"); scat(f[1], "DEL CUT"); scat(f[2], "EVEN"); scat(f[3], "HITS"); }
-    scat(f[4], v[P_SM_CHOP] % 3u ? "KEYS CHOP" : "KEYS MEL"); scat(f[5], "TRACKS");
+    if (!chop) scat(f[4], o3_ms - norm_ask_t < 3000u ? "NORM ?" : "NORMALIZE");   /* (0.31: KEYS stays on CHOP's F5) */
+    else scat(f[4], v[P_SM_CHOP] % 3u ? "KEYS CHOP" : "KEYS MEL");
+    scat(f[5], "TRACKS");
     return pf;
 }
 static void tracks_key(void);
@@ -257,6 +387,7 @@ static void smp_fkey(int i)
     uint32_t t = sel % NTRK; int chop = page == PG_S1;
     patch_t *d = &live_p[t]; uint8_t *v = d->v;
     if (i == 5) { tracks_key(); return; }
+    if (i == 4 && !chop) { smp_norm(t); return; }   /* (0.31) EDIT: NORMALIZE */
     if (i == 4) {                               /* KEYS: the sample over the keys (MEL) or the cuts (CHOP) */
         v[P_SM_CHOP] = (uint8_t)(v[P_SM_CHOP] % 3u ? 0u : 1u); trk_edited[t] = 1;   /* (0.25: the cuts stay as they are) */
         say(v[P_SM_CHOP] ? "KEYS CHOP – C3 = SLICE 1, C#3 = SLICE 2 …" : "KEYS MEL – THE SAMPLE IN TUNE, C3 = AS RECORDED");
@@ -265,12 +396,14 @@ static void smp_fkey(int i)
     if (!chop) {
         if (i == 0) { files_open(0); files_kind(FK_AUDIO); f_ttrk = t % NAU; say("LOAD A WAV ONTO THIS TRACK – ENTER"); return; }
         if (i == 1) {                           /* INPUT: what REC takes */
-            AU.src[t % NAU] = (uint8_t)((AU.src[t % NAU] + 1u) % NAUSRC); AU.st[t % NAU] = AU.src[t % NAU] == AU_RES ? 1u : 0u; aud_touch(); au_apply();
-            say(AU.src[t % NAU] == AU_RES ? "REC TAKES WHAT YOU HEAR (RESAMPLE)" : AU.src[t % NAU] == AU_IN2 ? "REC TAKES IN 2" : "REC TAKES IN 1");
+            static char m[32];
+            AU.src[t % NAU] = (uint8_t)smp_src_next(AU.src[t % NAU]); AU.st[t % NAU] = AU.src[t % NAU] == AU_RES ? 1u : 0u; aud_touch(); au_apply(); au_inputs();
+            m[0] = 0; if (AU.src[t % NAU] == AU_RES) scat(m, "REC TAKES WHAT YOU HEAR (RESAMPLE)"); else { scat(m, "REC TAKES "); smp_src_name(m + slen(m), AU.src[t % NAU]); }
+            say(m);
             return;
         }
         if (i == 2) { v[P_SM_PMODE] = (uint8_t)((v[P_SM_PMODE] + 1u) % 3u); trk_edited[t] = 1; say(v[P_SM_PMODE] == 0 ? "1-SHOT – PLAYS TO THE END" : v[P_SM_PMODE] == 1 ? "GATE – PLAYS WHILE HELD" : "LOOP – START TO END WHILE HELD"); return; }
-        if (i == 3) { v[P_SM_REV] ^= 1u; trk_edited[t] = 1; say(v[P_SM_REV] ? "REVERSE" : "FORWARD"); return; }
+        if (i == 3) { smp_trim(t); return; }    /* (0.31, Sven: "wie auf der MPC 1000 mit JJOS") */
         return;
     }
     if (i == 0) { sm_cut_add(t); return; }

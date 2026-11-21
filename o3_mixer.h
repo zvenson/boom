@@ -4,15 +4,25 @@
  * rows 2-3 mute (SHIFT: solo), row 4 the track. Each track shows its level, what it plays now (a meter after fader,
  * mute and solo) and MUTE / SOLO. */
 static uint32_t mix_row;
-#define NMROW 8u
-static const char *const MIX_ROW[NMROW] = {"LEVEL", "FX", "PAN", "DELAY", "REVERB", "CHORUS", "DRIVE", "MASTER"};   /* (0.7, Sven: DELAY right after PAN) */   /* (BOOM: FX second – the sum's punch-in effects) */
+#define NMROW 9u
+static const char *const MIX_ROW[NMROW] = {"LEVEL", "FX", "PAN", "EQ", "DELAY", "REVERB", "CHORUS", "DRIVE", "MASTER"};   /* (0.7, Sven: DELAY right after PAN) */   /* (BOOM: FX second – the sum's punch-in effects) */   /* (0.31: EQ after PAN) */
 #define MR_FX 1u
 #define MR_PAN 2u
-#define MR_MASTER 7u
+#define MR_EQ 3u                                /* (0.31) the CHOSEN track's EQ on the four knobs (as MASTER's): LOW MID FREQ HIGH, SHIFT + 1: LOW CUT */
+#define MR_MASTER 8u
 static uint8_t meter[NTRK];
 static uint32_t meter_t;
 
-static uint8_t *mix_send(uint32_t row) { return row == 3u ? set.mix_dly : row == 4u ? set.mix_rev : row == 5u ? set.mix_cho : set.mix_drv; }
+static uint8_t *mix_send(uint32_t row) { return row == 4u ? set.mix_dly : row == 5u ? set.mix_rev : row == 6u ? set.mix_cho : set.mix_drv; }
+static const char *const EQ_CUT_NAME[4] = {"OFF", "40 Hz", "80 Hz", "150 Hz"};
+static void eq_db(char *s, uint32_t v)          /* 64 = 0 dB, +-15 */
+{
+    int32_t d = ((int32_t)v - 64) * 150 / 63;   /* tenths */
+    if (d > -3 && d < 3) { scat(s, "0 dB"); return; }
+    scat(s, d < 0 ? "-" : "+"); if (d < 0) d = -d;
+    fmt_u(s + slen(s), (uint32_t)d / 10u); if (d < 100) { scat(s, "."); fmt_u(s + slen(s), (uint32_t)d % 10u); } scat(s, " dB");
+}
+static void eq_hz_txt(char *s, uint32_t v) { uint32_t hz = (uint32_t)(200.0f * vd_pow(25.0f, (float)v / 127.0f)); if (hz >= 1000u) { fmt_u(s, hz / 1000u); scat(s, "."); fmt_u(s + slen(s), hz % 1000u / 100u); scat(s, "k"); } else fmt_u(s, hz); }
 static void mixer_knobs(knob_t *k)
 {
     static const char *const ML[NTRK] = {"A", "B", "C", "D", "E", "F", "G", "H"}, *const MM[4] = {"VOLUME", "FILTER", "DRIVE", "COMP"}, *const MF[4] = {"FILTER", "CRUSH", "DUB", "REPEAT"};
@@ -20,6 +30,15 @@ static void mixer_knobs(knob_t *k)
         k[t].value[0] = 0; k[t].bip = 0;
         uint32_t tr = col_trk(t);
         k[t].label = mix_row == MR_MASTER ? MM[t] : mix_row == MR_FX ? MF[t] : tr < NTRK ? ML[tr] : 0;
+        if (mix_row == MR_EQ) {                 /* (0.31) the chosen track's EQ */
+            static const char *const EL[4] = {"LOW", "MID", "FREQ", "HIGH"};
+            uint32_t q = sel % NTRK, v = t == 0u ? set.eq_lo[q] : t == 1u ? set.eq_mid[q] : t == 2u ? set.eq_mf[q] : set.eq_hi[q];
+            k[t].label = t == 0u && seq_shift ? "LOW CUT" : EL[t];
+            if (t == 0u && seq_shift) { scat(k[t].value, EQ_CUT_NAME[set.eq_cut[q] & 3u]); k[t].v = (float)(set.eq_cut[q] & 3u) / 3.0f; continue; }
+            if (t == 2u) { eq_hz_txt(k[t].value, v); k[t].v = v / 127.0f; continue; }
+            eq_db(k[t].value, v); k[t].v = (float)v / 128.0f; k[t].bip = 1;
+            continue;
+        }
         if (mix_row != MR_MASTER && mix_row != MR_FX && tr >= NTRK) continue;
         if (mix_row == MR_FX) {
             if (t == 0u) { int32_t d = (int32_t)set.mfx[0] - 64;
@@ -50,6 +69,12 @@ static void mixer_turn(int k, int e)
         if (k == 0) set.mfx[0] = (uint8_t)clampi((int32_t)set.mfx[0] + e, 0, 128);
         else if (k == 3) set.mfx[3] = (uint8_t)clampi((int32_t)(set.mfx[3] % 6u) + (e > 0 ? 1 : -1), 0, 5);
         else set.mfx[k] = (uint8_t)clampi((int32_t)set.mfx[k] + e * 3, 0, 127);
+        mix_apply(); set_touch(); return;
+    }
+    if (mix_row == MR_EQ) {                     /* (0.31) */
+        uint32_t q = sel % NTRK;
+        if (k == 0 && seq_shift) set.eq_cut[q] = (uint8_t)clampi((int32_t)(set.eq_cut[q] & 3u) + (e > 0 ? 1 : -1), 0, 3);
+        else { uint8_t *v = k == 0 ? &set.eq_lo[q] : k == 1 ? &set.eq_mid[q] : k == 2 ? &set.eq_mf[q] : &set.eq_hi[q]; *v = (uint8_t)clampi((int32_t)*v + e, 0, 127); }
         mix_apply(); set_touch(); return;
     }
     if (mix_row == MR_MASTER) {
@@ -87,15 +112,55 @@ static void meters_take(void)                   /* the tracks' peaks: up at once
         meter[t] = (uint8_t)(m > meter[t] ? m : meter[t] > 2u ? meter[t] - 2u : 0u);
     }
 }
+static float eq_mag_db(uint32_t q, float hz)    /* the curve the panel draws: the bands' gains, shaped (not the exact filters) */
+{
+    static const float CUT_HZ[4] = {0.0f, 40.0f, 80.0f, 150.0f};
+    float lo = ((float)set.eq_lo[q] - 64.0f) * (15.0f / 63.0f), mi = ((float)set.eq_mid[q] - 64.0f) * (15.0f / 63.0f), hi = ((float)set.eq_hi[q] - 64.0f) * (15.0f / 63.0f);
+    float l2 = vd_log2(hz), d, x, c = CUT_HZ[set.eq_cut[q] & 3u];
+    x = (l2 - vd_log2(100.0f)) * 1.6f; d = lo / (1.0f + (x > 0.0f ? x * x * x : 0.0f) * 3.0f + (x > 0.0f ? x : 0.0f));
+    if (x <= 0.0f) d = lo;
+    x = (l2 - vd_log2(200.0f * vd_pow(25.0f, (float)set.eq_mf[q] / 127.0f))) * 1.4f; d += mi / (1.0f + x * x * 2.5f);
+    x = (vd_log2(8000.0f) - l2) * 1.6f; d += x <= 0.0f ? hi : hi / (1.0f + x * x * x * 3.0f + x);
+    if (c > 0.0f && hz < c * 2.0f) { float r = hz / c; d += r < 1.0f ? 40.0f * vd_log2(r) / 3.3219f : -3.0f * (2.0f - r); }
+    return d;
+}
+static void eq_view(const knob_t *k)            /* (0.31) the chosen track's EQ: four dials, its curve */
+{
+    uint32_t q = sel % NTRK, c = TRK_RGB[q], i;
+    char b[48];
+    for (i = 0; i < 4u; i++) {
+        int x = CX0 + (int)i * COLW, cx = x + COLW / 2 - 2;
+        vg_text(k[i].label, cx, 74, VG_MED, i == 0u && seq_shift ? 0x2BFFB4 : DIM, VG_CENTER);
+        dial(cx, 116, 26, k[i].v, k[i].bip, 0x2BFFB4);
+        vg_text(k[i].value, cx, 146, VG_BIG, FG, VG_CENTER);
+    }
+    {   /* the curve: 20 Hz .. 20 kHz, +-15 dB */
+        int X = CX0 + 4, W = CW - 8, Y = 178, H = 86, mid = Y + H / 2, py = 0;
+        vg_rect(X, Y, W, H, CELL);
+        vg_rect(X, mid, W, 1, CELL2);
+        for (i = 0; i < 3u; i++) { static const float G[3] = {100.0f, 1000.0f, 10000.0f}; int gx = X + (int)((vd_log2(G[i]) - vd_log2(20.0f)) / (vd_log2(20000.0f) - vd_log2(20.0f)) * (float)W); vg_rect(gx, Y, 1, H, CELL2); }
+        for (int xx = 0; xx < W; xx += 2) {
+            float hz = 20.0f * vd_pow(1000.0f, (float)xx / (float)W), d = eq_mag_db(q, hz);
+            int y = mid - (int)(d / 15.0f * (float)(H / 2 - 4));
+            if (y < Y + 1) y = Y + 1; if (y > Y + H - 2) y = Y + H - 2;
+            if (xx) { int a = py < y ? py : y, h = (py < y ? y - py : py - y) + 2; vg_rect(X + xx, a, 2, h, c); }
+            py = y;
+        }
+        b[0] = 0; scat(b, "TRACK "); { char l[2] = {(char)('A' + q), 0}; scat(b, l); } scat(b, " · LOW CUT "); scat(b, EQ_CUT_NAME[set.eq_cut[q] & 3u]);
+        vg_text(b, X + 6, Y + 4, VG_SMALL, FG, VG_LEFT);
+        vg_text("ENC A: TRACK · SHIFT + 1: LOW CUT", X + W - 6, Y + H - 16, VG_SMALL, MUTED, VG_RIGHT);
+    }
+}
 static void mixer_view(void)
 {
     knob_t k[4];
     mixer_knobs(k);
     for (int i = 0; i < (int)NMROW; i++) {      /* the rows, the open one bright */
-        int x = CX0 + i * 58, on = (uint32_t)i == mix_row;
-        vg_round(x, 41, 54, 24, 4, on ? (i == (int)MR_MASTER ? 0xFF3D6E : i == (int)MR_FX ? 0x00E5FF : ACCENT) : CELL);
-        vg_text(MIX_ROW[i], x + 27, 46, VG_BOLD, on ? 0x0E0624 : DIM, VG_CENTER);
+        int x = CX0 + i * 51, on = (uint32_t)i == mix_row;   /* (0.31: nine rows) */
+        vg_round(x, 41, 48, 24, 4, on ? (i == (int)MR_MASTER ? 0xFF3D6E : i == (int)MR_FX ? 0x00E5FF : i == (int)MR_EQ ? 0x2BFFB4 : ACCENT) : CELL);
+        vg_text(MIX_ROW[i], x + 24, 46, VG_BOLD, on ? 0x000000 : DIM, VG_CENTER);
     }
+    if (mix_row == MR_EQ) { eq_view(k); return; }
     for (uint32_t col = 0; col < 4u; col++) {
         uint32_t t = col_trk(col);
         int fxrow = mix_row == MR_FX, mrow = mix_row == MR_MASTER, x = CX0 + (int)col * COLW, cx = x + COLW / 2 - 2;
@@ -122,8 +187,8 @@ static void mixer_view(void)
             for (int j = 0; j < mh; j += 3) vg_rect(x + 30, 266 - j, 9, 2, j >= 64 ? RED : j >= 50 ? 0xFFE14D : GREEN);
         }
         vg_text(ctl_trk_on >> t & 1u ? "PLAY" : "STOP", x + 78, 198, VG_MED, ctl_trk_on >> t & 1u ? GREEN : MUTED, VG_CENTER);
-        vg_round(x + 50, 236, 26, 26, 4, mu ? RED : CELL2); vg_text("M", x + 63, 241, VG_MED, mu ? 0x0E0624 : DIM, VG_CENTER);
-        vg_round(x + 80, 236, 26, 26, 4, so ? 0xFFE14D : CELL2); vg_text("S", x + 93, 241, VG_MED, so ? 0x0E0624 : DIM, VG_CENTER);
+        vg_round(x + 50, 236, 26, 26, 4, mu ? RED : CELL2); vg_text("M", x + 63, 241, VG_MED, mu ? 0x000000 : DIM, VG_CENTER);
+        vg_round(x + 80, 236, 26, 26, 4, so ? 0xFFE14D : CELL2); vg_text("S", x + 93, 241, VG_MED, so ? 0x000000 : DIM, VG_CENTER);
     }
 }
 static void mixer_leds(void)                    /* row 1 start/stop, rows 2-3 mute / solo, row 4 the tracks */

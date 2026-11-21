@@ -41,7 +41,7 @@ static uint32_t trk_x_used;                     /* bit t: trk_x[t] holds sound i
 #define NMFX 4u                                 /* (BOOM) MASTER FX on the sum: FILTER, CRUSH, ECHO, REPEAT (o3_core.h master_fx) */
 static volatile uint8_t ctl_mfx[NMFX] = {64, 0, 0, 0};
 typedef struct { uint8_t lvl[NPART], cho[NPART], dly[NPART], rev[NPART], drv[NPART]; int8_t pan[NPART]; uint32_t off;
-                 uint8_t dv_type, dv_amt, dv_tone, dv_mix, m_vol, m_dj, m_drive, m_comp, tempo, mfx[NMFX]; } mxq_t;
+                 uint8_t dv_type, dv_amt, dv_tone, dv_mix, m_vol, m_dj, m_drive, m_comp, tempo, mfx[NMFX]; uint8_t eq[NPART][5]; } mxq_t;   /* (0.31: eq) */
 static mxq_t mx_q;
 static volatile uint32_t ctl_mx_swap;
 
@@ -176,6 +176,7 @@ typedef struct {
     float bend, lfo_pd, lfo_fd, lfo_ad, gain;   /* derived once per block */
     uint32_t type;
     ov_part_t ov;                               /* SYNTH's */
+    float ep_trem;                              /* (0.31) E-PIANO: the tremolo's phase (turns) */
 } part_t;
 static part_t pt[NPART] = {{&live_p[0], 0, 0, 0, 0, 60}, {&live_p[1], 0, 0, 0, 0, 60}, {&live_p[2], 0, 0, 0, 0, 60}, {&live_p[3], 0, 0, 0, 0, 60},
                            {&live_p[4], 0, 0, 0, 0, 60}, {&live_p[5], 0, 0, 0, 0, 60}, {&live_p[6], 0, 0, 0, 0, 60}, {&live_p[7], 0, 0, 0, 0, 60}};
@@ -205,6 +206,7 @@ typedef struct {
     uint32_t sp_i; float sp_f, sp_lp, sp_k;      /* (0.13) an acoustic drum: its place in the sample, a low-pass by the velocity */
     uint32_t sm_a, sm_b, sm_i, sm_age; float sm_f, sm_acc, sm_hold, sm_lp; uint8_t sm_done, sm_rev, sm_loop, sm_pad;   /* (0.19) a SAMPLER slice: from, to, where, how long */
     uint8_t dx_pos, dx_up, dx_note0, dx_pad;    /* frames of dx_buf played · key let go told · the note it began on */
+    float ep_k, ep_b, ep_tb, ep_nrm, ep_pre, ep_post, ep_velc, ep_fast, ep_det, ep_lo, ep_top;   /* (0.31) E-PIANO: the pickup's curve, the preamp, the touch */
 } voice_t;
 static voice_t vc[NV];
 static uint32_t vseq, rr[NPART];
@@ -244,6 +246,11 @@ static void voice_start(voice_t *v, uint32_t part, uint32_t note, uint32_t vel, 
                 else { v->sm_a = v->sm_b = 0; }
                 if (v->sm_b > v->sm_a + 64u) { v->sm_i = v->sm_rev ? v->sm_b - 2u : v->sm_a; v->sm_done = 0; }
             }
+        }
+        if (v->type == T_EP) {                  /* (0.31) a new strike: the tine / reed from rest, all its envelopes full */
+            for (uint32_t i = 0; i < 4u; i++) { v->openv[i] = 1.0f; v->opl0[i] = v->opl1[i] = 0.0f; }
+            v->ph[0] = v->ph[1] = v->ph[2] = 0.0f; v->hp = 0.0f; v->dc_x = v->dc_y = 0.0f; v->ck2 = -1; v->ep_fast = 1.0f;
+            v->ep_lo = v->ep_top = 0.0f; v->ep_det = 1.0f + noise_f(&v->noise) * 0.0011f;   /* (no two tines quite alike: +-2 cents) */
         }
         if (v->type == T_DX) {                  /* a new DX7 note from the sound's voice and its macros */
             uint8_t vb[DX_VOICE];
@@ -320,6 +327,7 @@ static void drum_hit(uint32_t part, uint32_t drum, uint32_t vel)
     voice_start(v, part, DRUM_NOTE[drum], vel, 0, 1);
     v->drum = (uint8_t)drum; v->aenv = 1.0f; v->ast = E_DEC;
     v->ph[0] = v->ph[1] = 0.0f;                 /* (the kick and the toms start clean) */
+    v->penv = 1.0f; v->fenv = 1.0f;             /* (0.31: the kick's two sweeps) */
     v->hp = 0.0f; v->dc_x = v->dc_y = 0.0f;
     v->sp_i = 0; v->sp_f = 0.0f; v->sp_lp = 0.0f;
     v->ck1 = v->ck2 = -1;
@@ -512,6 +520,25 @@ static void arp_tick(uint32_t p)
 /* ---- note events, per sound: its held keys, its arp, its HOLD; the pedal holds them all */
 static uint32_t sus_was;
 static inline uint32_t part_sus(uint32_t p) { return ctl_sustain || (ctl_hold >> p & 1u); }
+/* (0.31, Sven: "Arp auf Spur die schon aufgenommen ist tut nix") the sequencer's notes on a track with its ARP on: they are
+ * the arp's held notes (phys 2 = the sequencer's), as if the keys held the step's chord – not one by one into the voices.
+ * A track recorded FROM the arp (trk.pad[1]: its steps are the arp's notes already) plays them as they are. */
+static int seq_feeds_arp(uint32_t p);           /* (obv_seq.h) */
+static void seq_note_on(uint32_t p, uint32_t note, uint32_t vel)
+{
+    if (!seq_feeds_arp(p)) { voice_trigger(p, note, vel); return; }
+    held_remove(p, note);
+    if (nheld[p] == NHELD) { for (uint32_t i = 1; i < NHELD; i++) held[p][i - 1u] = held[p][i]; nheld[p]--; }
+    held[p][nheld[p]].note = (uint8_t)note; held[p][nheld[p]].vel = (uint8_t)vel; held[p][nheld[p]].phys = 2;
+    if (++nheld[p] == 1u) { arp[p].pos = 0; arp[p].cnt = 0xFFFFFFFFu; }
+}
+static void seq_note_off(uint32_t p, uint32_t note)
+{
+    uint32_t i, j, was = 0;
+    for (i = j = 0; i < nheld[p]; i++) { if (held[p][i].note == note && held[p][i].phys == 2u) { was = 1; continue; } held[p][j++] = held[p][i]; }
+    nheld[p] = j;
+    if (!was || !seq_feeds_arp(p)) voice_release(p, note, 1);   /* (the arp off meanwhile: the voice it played goes too) */
+}
 static void ev_note_on(uint32_t p, uint32_t note, uint32_t vel)
 {
     uint32_t i, arp_on = pt[p].p->v[P_ARP_MODE] != A_OFF, sus = part_sus(p);
@@ -608,7 +635,7 @@ static void ov_voice_block(voice_t *vv, uint32_t card, float lfo_f);
 static void ov_voice_render(voice_t *vv, int32_t *out);
 /* (BOOM 0.10, Sven: more headroom) each kind's trim: measured over all 176 sounds, a kit's hit stood at 2.4 x full scale,
  * an FM chord at 1.5, a DX chord at 1.0-2.0, the 808 and the strings at 0.6 – now they sit around the same level */
-static const float KIND_TRIM[NTYPE] = {0.6f, 1.0f, 0.7f, 1.0f, 0.75f, 1.0f, 0.9f, 0.0f};
+static const float KIND_TRIM[NTYPE] = {0.6f, 1.0f, 0.7f, 1.0f, 0.75f, 1.0f, 0.9f, 0.0f, 1.0f};
 static void block_globals(part_t *g)
 {
     const uint8_t *pv = g->p->v;
@@ -620,6 +647,10 @@ static void block_globals(part_t *g)
     g->lfo_ad = (float)pv[P_LFO_AMP] / 127.0f;
     d = (float)pv[P_VOLUME] / 100.0f; g->gain = d * d * KIND_TRIM[g->type];
     if (g->type == T_SYNTH) ov_block_globals(g);
+    if (g->type == T_EP) {                      /* (0.31) the tremolo: 1.5 .. 9 Hz */
+        g->ep_trem += 1.5f * vd_exp2((float)pv[P_EP_RATE] * (2.6f / 127.0f)) * (float)CTL * inv_fs;
+        if (g->ep_trem >= 1.0f) g->ep_trem -= 1.0f;
+    }
 }
 
 /* ---- FM: the algorithms – which operators modulate which (bit i: operator i), and the carriers */
@@ -707,12 +738,16 @@ static void voice_block(voice_t *v, uint32_t card)
             return;
         }
         switch (d) {
-        case DR_KICK: {
-            float f0 = 35.0f * vd_exp2((float)pv[P_K_TUNE] / 127.0f * 1.5f), oct = (float)pv[P_K_PUNCH] / 127.0f * 4.0f;
-            v->penv -= v->penv * kblock(12.0f + (float)pv[P_K_PUNCH] * 0.2f);
-            hz = f0 * vd_exp2(v->penv * oct);
+        case DR_KICK: {                         /* (0.31, Sven: "was sind das für Bassdrums?" – a sine with one sweep and no attack, 5 dB
+                                                 * under the sampled kicks, the short ones without a body) now: a two-stage sweep (a fast drop
+                                                 * = the punch, a slow settle = the body), the beater's click, a short hold, a longer DECAY */
+            float pu = (float)pv[P_K_PUNCH] / 127.0f, f0 = 32.0f * vd_exp2((float)pv[P_K_TUNE] / 127.0f * 1.3f), oct = 1.0f + pu * 3.2f;
+            v->penv -= v->penv * kblock(4.0f + pu * 5.0f);       /* the fast part: 4-9 ms */
+            v->fenv -= v->fenv * kblock(28.0f + pu * 22.0f);     /* the slow part: 28-50 ms */
+            hz = f0 * vd_exp2(oct * (0.7f * v->penv + 0.3f * v->fenv));
             v->inc1[0] = hz * inv_fs;
-            dec_tick(&v->aenv, &v->ast, DK[pv[P_K_DECAY]], v->kill);
+            svf_key(v, 1, 3500.0f, 1.1f);                        /* the beater: noise around 3.5 kHz */
+            if (v->t > 0.010f || v->kill) dec_tick(&v->aenv, &v->ast, kblock(drum_ms(pv[P_K_DECAY], 25.0f, 40.0f)), v->kill);   /* (held 10 ms: the body stands) 25 ms .. 1 s */
             break; }
         case DR_SNARE: {
             float f1 = 120.0f * vd_exp2((float)pv[P_S_TUNE] / 127.0f * 1.5f);
@@ -758,6 +793,68 @@ static void voice_block(voice_t *v, uint32_t card)
         /* the kit's filter (CUTOFF / RESO) */
         svf_key(v, 2, cut_hz((float)pv[P_CUTOFF] + 8.0f), 0.5f + (float)pv[P_RESO] / 127.0f * 6.0f);
         a = v->aenv * velg * lvl * g->gain;
+        v->amp1 = a;
+        ui_vlevel[card] = (int32_t)(a * 32767.0f); ui_vnote[card] = v->note;
+        return;
+    }
+    if (v->type == T_EP) {                      /* (0.31) E-PIANO: a struck tine or reed – FM with a falling index, a bell / bite on
+                                                 * the attack, the hammer's noise; the pickup's curve and the tremolo after it */
+        const int reed = pv[P_EP_MODEL] & 1u;
+        float p, hz, vel = (float)v->vel / 127.0f, sens = (float)pv[P_EP_VELO] / 127.0f, velc, va, keysc, tsec, bl, bk, d, s2, t, mono, cut, kb;
+        if (v->pitch != v->target) {
+            float gk = pv[P_GLIDE] ? GK[pv[P_GLIDE]] : 1.0f, diff = v->target - v->pitch;
+            v->pitch += diff * gk; if (diff > -0.002f && diff < 0.002f) v->pitch = v->target;
+        }
+        p = v->pitch + g->bend + (float)ctl_tune8 * (1.0f / 256.0f) + lfo * g->lfo_pd;
+        hz = hz_of(p);
+        v->inc1[0] = hz * inv_fs * v->ep_det;
+        v->inc1[1] = v->inc1[0];                /* the modulator: on the fundamental (the tine's / reed's own motion) */
+        v->inc1[2] = v->inc1[0] * (reed ? 3.0f : 14.0f);   /* TINE: the bell high up · REED: an odd partial, the bite */
+        velc = 1.0f - sens + sens * vel;        /* the touch, as the hammer sees it */
+        va = 1.0f - sens * 0.55f * (1.0f - vel);   /* (the rest of the touch is in the swing) */
+        keysc = vd_exp2(-((float)v->note - 60.0f) * (1.0f / 24.0f));   /* higher notes ring shorter */
+        /* the decays: the note (1 .. 12 s at C4 to silence), the index (brightness), the bell, the hammer */
+        tsec = vd_pow(12.0f, (float)pv[P_EP_DECAY] / 127.0f) * (reed ? 0.7f * vd_exp2(-((float)v->note - 60.0f) * (1.0f / 36.0f)) : keysc);   /* (a reed dies less steeply up high) */
+        v->openv[0] *= vd_exp2(-(float)CTL * inv_fs * 6.9f / tsec * 1.4427f);
+        v->ep_fast *= vd_exp2(-(float)CTL * inv_fs / ((reed ? 0.18f : 0.28f) * (0.5f + 0.5f * keysc)) * 1.4427f);   /* the first drop after the strike */
+        v->openv[1] *= vd_exp2(-(float)CTL * inv_fs / ((reed ? 0.5f : 0.3f) * (0.4f + 0.6f * keysc)) * 1.4427f);
+        v->openv[2] *= vd_exp2(-(float)CTL * inv_fs / (reed ? 0.12f : 0.07f) * 1.4427f);
+        v->openv[3] *= vd_exp2(-(float)CTL * inv_fs / 0.006f * 1.4427f);
+        for (uint32_t i = 0; i < 4u; i++) v->opl0[i] = v->opl1[i];
+        /* the index in turns: a floor (the tine keeps a little shape), the strike on top of it */
+        {
+            float tone = (float)pv[P_EP_TONE] / 127.0f, ix = tone * (0.12f + 0.88f * velc * velc);
+            v->opl1[1] = (reed ? 0.40f : 0.24f) * ix * (0.10f + 0.90f * v->openv[1]);
+        }
+        /* (0.31b) the tine's swing INTO the pickup: the touch and its decay – hard and fresh it barks, ringing out it gets round */
+        {
+            float sw = (0.1f + 0.9f * velc * velc) * v->openv[0] * (0.62f + 0.38f * v->ep_fast);
+            v->opl1[0] = sw;
+        }
+        bl = (float)pv[P_EP_BELL] / 127.0f * (reed ? 0.30f : 0.22f) * (0.3f + 0.7f * velc) * v->openv[2];
+        if (v->inc1[2] > 0.42f) bl = 0.0f; else if (v->inc1[2] > 0.3f) bl *= (0.42f - v->inc1[2]) * (1.0f / 0.12f);   /* (no aliasing up high) */
+        v->opl1[2] = bl;
+        v->opl1[3] = (float)pv[P_EP_NOISE] / 127.0f * 0.35f * velc * v->openv[3];
+        /* the pickup: an offset curve – soft played it is clean, hard played it barks (even harmonics) */
+        bk = (float)pv[P_EP_BARK] / 127.0f * (0.4f + 0.6f * velc);
+        v->ep_k = (reed ? 1.2f : 0.6f) + bk * (reed ? 6.5f : 5.5f); v->ep_b = reed ? 0.2f : 0.35f;
+        v->ep_tb = vd_tanh(v->ep_k * v->ep_b); v->ep_nrm = 1.0f / (v->ep_k * (1.0f - v->ep_tb * v->ep_tb));
+        d = (float)pv[P_EP_DRIVE] / 127.0f; v->ep_pre = 1.0f + d * d * 9.0f; v->ep_post = 0.5f / vd_tanh(0.5f * v->ep_pre) * (1.0f + d * 0.25f);   /* (a swing of 0.5 stays 0.5: driven it gets denser, not quieter) */
+        v->ep_velc = velc;
+        /* the key: attack (AMP ENV), held, then the damper (RELEASE) */
+        adsr_tick(&v->aenv, &v->ast, pv[P_AA], 0u, 1.0f, pv[P_AR], v->gate, v->kill);
+        adsr_tick(&v->fenv, &v->fst, pv[P_FA], pv[P_FD], (float)pv[P_FS] / 127.0f, pv[P_FR], v->gate, v->kill);
+        if (v->openv[0] < 0.0003f) { v->aenv = 0.0f; v->ast = E_IDLE; }
+        cut = (float)pv[P_CUTOFF] + 8.0f + v->fenv * ((float)pv[P_FENV_AMT] - 64.0f) * 1.5f + lfo * g->lfo_fd + ((float)v->note - 60.0f) * 0.3f;
+        svf_key(v, 2, cut_hz(cut), 0.5f + (float)pv[P_RESO] / 127.0f * 9.0f);
+        /* the tremolo: volume (the amp's) or left-right (the suitcase's) */
+        d = (float)pv[P_EP_TREM] / 127.0f; s2 = (float)pv[P_EP_STEREO] / 127.0f; t = sinf_t(g->ep_trem);
+        mono = 1.0f - d * (1.0f - s2) * 0.5f * (1.0f - t);
+        v->gl = 1.0f - d * s2 * 0.45f * (1.0f + t); v->gr = 1.0f - d * s2 * 0.45f * (1.0f - t);
+        kb = reed ? 1.45f : 1.0f;   /* (a reed swings less into its pickup: as loud as a tine) */
+        v->amp0 = v->amp1;
+        a = v->aenv * va * g->gain * mono * kb * 0.34f;   /* (the swing is in opl[0]: the decay too) */
+        a *= 1.0f - (1.0f - lfo) * 0.5f * g->lfo_ad;
         v->amp1 = a;
         ui_vlevel[card] = (int32_t)(a * 32767.0f); ui_vnote[card] = v->note;
         return;
@@ -1028,14 +1125,17 @@ static void voice_render(voice_t *v, int32_t *out)
         uint32_t d = v->drum;
         float drv = d == DR_KICK ? (float)pv[P_K_DRIVE] / 127.0f : d == DR_CLAP ? (float)pv[P_C_DRIVE] / 127.0f : 0.0f;
         float pre = 1.0f + drv * 8.0f, post = 1.0f / (1.0f + drv * 1.5f), snap = (float)pv[P_S_SNAP] / 127.0f;
+        const float kclick = (0.18f + 0.75f * (float)pv[P_K_PUNCH] / 127.0f) * (0.4f + 0.6f * (float)v->vel / 127.0f);   /* (0.31) the kick's click: PUNCH, how hard */
         for (uint32_t i = 0; i < CTL; i++) {
             float y = 0.0f, n;
             switch (d) {
-            case DR_KICK:
+            case DR_KICK: {                     /* (0.31) body + the beater's click, then the drive */
+                float ts = v->t - (float)(CTL - i) * inv_fs, ck = ts < 0.012f ? vd_exp2(-ts * (1.4427f / 0.0018f)) : 0.0f;
                 y = sinf_t(v->ph[0]);
-                if (v->t < 0.002f && i == 0u) y += noise_f(&v->noise) * 0.4f;
-                if (drv > 0.0f) y = vd_tanh(y * pre) * post;
-                break;
+                if (ck > 0.002f) y += vd_svf_tick(&v->f1, &v->c1, noise_f(&v->noise)).bp * ck * kclick;
+                if (drv > 0.0f) y = vd_tanh(y * pre) * post * (1.0f + drv * 0.5f);
+                y *= 1.75f;                     /* (+5 dB: as loud as the sampled kicks) */
+                break; }
             case DR_SNARE: {
                 float body = (sinf_t(v->ph[0]) * 0.6f + sinf_t(v->ph[1]) * 0.35f) * v->penv;
                 n = vd_svf_tick(&v->f1, &v->c1, noise_f(&v->noise)).hp;
@@ -1105,6 +1205,32 @@ static void voice_render(voice_t *v, int32_t *out)
                 v->ph[k] += dt; inc[k] += dinc[k]; if (v->ph[k] >= 1.0f) v->ph[k] -= 1.0f;
             }
             if (filt) y = vd_svf_tick(&v->f2, &v->c2, y).lp;
+            y *= amp; amp += da;
+            out[2u * i] += (int32_t)(y * gl * 32767.0f);
+            out[2u * i + 1u] += (int32_t)(y * gr * 32767.0f);
+        }
+        return;
+    }
+    if (v->type == T_EP) {                      /* (0.31) E-PIANO */
+        float sw = v->opl0[0], dsw = (v->opl1[0] - v->opl0[0]) * (1.0f / (float)CTL);
+        float ix = v->opl0[1], dix = (v->opl1[1] - v->opl0[1]) * (1.0f / (float)CTL);
+        float bl = v->opl0[2], dbl = (v->opl1[2] - v->opl0[2]) * (1.0f / (float)CTL);
+        float nz = v->opl0[3], dnz = (v->opl1[3] - v->opl0[3]) * (1.0f / (float)CTL);
+        const float k = v->ep_k, bb = v->ep_b, tb = v->ep_tb, nrm = v->ep_nrm, pre = v->ep_pre, post = v->ep_post;
+        const int drv = pre > 1.01f;
+        const float lo_k = 180.0f * 6.2832f * inv_fs, top_k = 1.0f - vd_exp2(-6.2832f * 7000.0f * inv_fs * 1.4427f);
+        for (uint32_t i = 0; i < CTL; i++) {
+            float x = sinf_t(v->ph[0] + ix * sinf_t(v->ph[1])) + bl * sinf_t(v->ph[2]), y;
+            v->hp += (noise_f(&v->noise) - v->hp) * 0.25f;
+            x = x * sw + v->hp * nz;
+            y = (vd_tanh(k * (x + bb)) - tb) * nrm;   /* the pickup (unity for small signals, its DC taken below) */
+            { float dc = y - v->dc_x + 0.998f * v->dc_y; v->dc_x = y; v->dc_y = dc; y = dc; }
+            v->ep_lo += (y - v->ep_lo) * lo_k; y += v->ep_lo * 0.7f;         /* the body: +4.6 dB under ~180 Hz – the depth */
+            v->ep_top += (y - v->ep_top) * top_k; y = v->ep_top;              /* the pickup's top: soft above ~7 kHz */
+            if (drv) y = vd_tanh(y * pre) * post;
+            if (filt) y = vd_svf_tick(&v->f2, &v->c2, y).lp;
+            for (uint32_t q = 0; q < 3u; q++) { v->ph[q] += inc[q]; inc[q] += dinc[q]; if (v->ph[q] >= 1.0f) v->ph[q] -= 1.0f; }
+            ix += dix; bl += dbl; nz += dnz; sw += dsw;
             y *= amp; amp += da;
             out[2u * i] += (int32_t)(y * gl * 32767.0f);
             out[2u * i + 1u] += (int32_t)(y * gr * 32767.0f);
@@ -1229,6 +1355,63 @@ static void ens_process(ens_t *e, int32_t *b, uint32_t n, uint32_t amount)
 }
 static int32_t mix_g[NPART];
 
+/* (0.31, Sven: "im Mixer auch einen EQ") each track's channel EQ, before its fader: LOW shelf 100 Hz, MID bell (200 Hz-5 kHz,
+ * Q 0.9), HIGH shelf 8 kHz, +-15 dB, and a LOW CUT (12 dB/oct at 40 / 80 / 150 Hz). RBJ biquads, float, transposed
+ * direct form II; a flat track costs nothing. The main loop writes ctl_eq; new coefficients when a value changed. */
+static volatile uint8_t ctl_eq[NPART][5] = {{64, 64, 64, 64, 0}, {64, 64, 64, 64, 0}, {64, 64, 64, 64, 0}, {64, 64, 64, 64, 0},
+                                            {64, 64, 64, 64, 0}, {64, 64, 64, 64, 0}, {64, 64, 64, 64, 0}, {64, 64, 64, 64, 0}};
+typedef struct { float b0, b1, b2, a1, a2; } bq_c;
+typedef struct { bq_c c[4]; float z[4][2][2]; uint8_t on[4], key[5], any, ok; } eq_t;
+static eq_t eqs[NPART];
+static float eq_hz(uint32_t v) { return 200.0f * vd_pow(25.0f, (float)v / 127.0f); }   /* MID's FREQ: 200 Hz .. 5 kHz */
+static void bq_set(bq_c *c, int kind, float hz, float db, float q)   /* kind 0 low shelf · 1 bell · 2 high shelf · 3 high-pass */
+{
+    float A = vd_exp2(db * (0.025f * 3.3219281f)), w = hz / fs_f, cs = vd_sin(w + 0.25f), sn = vd_sin(w), al = sn / (2.0f * q), b0, b1, b2, a0, a1, a2;
+    if (kind == 1) { b0 = 1.0f + al * A; b1 = -2.0f * cs; b2 = 1.0f - al * A; a0 = 1.0f + al / A; a1 = -2.0f * cs; a2 = 1.0f - al / A; }
+    else if (kind == 3) { b0 = (1.0f + cs) * 0.5f; b1 = -(1.0f + cs); b2 = b0; a0 = 1.0f + al; a1 = -2.0f * cs; a2 = 1.0f - al; }
+    else {
+        float sa = 2.0f * vd_sqrt(A) * al, ap = A + 1.0f, am = A - 1.0f;
+        if (kind == 0) { b0 = A * (ap - am * cs + sa); b1 = 2.0f * A * (am - ap * cs); b2 = A * (ap - am * cs - sa); a0 = ap + am * cs + sa; a1 = -2.0f * (am + ap * cs); a2 = ap + am * cs - sa; }
+        else { b0 = A * (ap + am * cs + sa); b1 = -2.0f * A * (am + ap * cs); b2 = A * (ap + am * cs - sa); a0 = ap - am * cs + sa; a1 = 2.0f * (am - ap * cs); a2 = ap - am * cs - sa; }
+    }
+    c->b0 = b0 / a0; c->b1 = b1 / a0; c->b2 = b2 / a0; c->a1 = a1 / a0; c->a2 = a2 / a0;
+}
+static void eq_update(uint32_t p)               /* the coefficients, when a value changed */
+{
+    eq_t *e = &eqs[p];
+    static const float CUT_HZ[4] = {0.0f, 40.0f, 80.0f, 150.0f};
+    uint8_t k[5]; int ch = !e->ok;
+    for (uint32_t i = 0; i < 5u; i++) { k[i] = ctl_eq[p][i]; if (k[i] != e->key[i]) ch = 1; }
+    if (!ch) return;
+    for (uint32_t i = 0; i < 4u; i++) { int was = e->on[i]; e->on[i] = i == 3u ? k[4] != 0u : k[i == 2u ? 3u : i] != 64u; if (e->on[i] && !was) memset(e->z[i], 0, sizeof e->z[i]); }
+    if (e->on[0]) bq_set(&e->c[0], 0, 100.0f, ((float)k[0] - 64.0f) * (15.0f / 63.0f), 0.707f);
+    if (e->on[1]) bq_set(&e->c[1], 1, eq_hz(k[2]), ((float)k[1] - 64.0f) * (15.0f / 63.0f), 0.9f);
+    if (e->on[2]) bq_set(&e->c[2], 2, 8000.0f, ((float)k[3] - 64.0f) * (15.0f / 63.0f), 0.707f);
+    if (e->on[3]) bq_set(&e->c[3], 3, CUT_HZ[k[4] & 3u], 0.0f, 0.707f);
+    e->any = e->on[0] | e->on[1] | e->on[2] | e->on[3];
+    memcpy(e->key, k, 5); e->ok = 1;
+}
+static void eq_process(uint32_t p, int32_t *b, uint32_t n)
+{
+    eq_t *e = &eqs[p];
+    eq_update(p);
+    if (!e->any) return;
+    for (uint32_t c = 0; c < 2u; c++)
+        for (uint32_t f = 0; f < 4u; f++) {
+            if (!e->on[f]) continue;
+            const bq_c q = e->c[f]; float z1 = e->z[f][c][0], z2 = e->z[f][c][1];
+            for (uint32_t i = 0; i < n; i++) {
+                float x = (float)b[2u * i + c], y = q.b0 * x + z1;
+                z1 = q.b1 * x - q.a1 * y + z2; z2 = q.b2 * x - q.a2 * y;
+                b[2u * i + c] = (int32_t)y;
+            }
+            if (!(z1 > -1e30f && z1 < 1e30f) || !(z2 > -1e30f && z2 < 1e30f)) z1 = z2 = 0.0f;   /* (never a stuck filter) */
+            if (z1 < 1e-9f && z1 > -1e-9f) z1 = 0.0f;   /* (no denormals in the silence) */
+            if (z2 < 1e-9f && z2 > -1e-9f) z2 = 0.0f;
+            e->z[f][c][0] = z1; e->z[f][c][1] = z2;
+        }
+}
+
 static void au_block(uint32_t k);
 static void au_mix(int32_t (*b)[2u * HALF_FRAMES], uint32_t n, uint32_t *used);
 static int au_resampling(void);
@@ -1280,6 +1463,7 @@ static void engine_audio(int32_t *out, uint32_t n)
     au_mix(bus, n, &used);
     for (p = 0; p < NPART; p++)                  /* (0.9) the STRINGS' ensemble on its track */
         if ((used >> p & 1u) && part_type(p) == T_STR && pt[p].p->v[P_ST_ENS]) ens_process(&ens[p], bus[p], n, pt[p].p->v[P_ST_ENS]);
+    for (p = 0; p < NPART; p++) if (used >> p & 1u) eq_process(p, bus[p], n);   /* (0.31) the channel EQ, before the fader */
     for (p = 0; p < NPART; p++) {
         int32_t lvl = ctl_mix_off >> p & 1u ? 0 : (int32_t)ctl_mix_lvl[p], target = lvl * lvl * 4096 / 10000, g0 = mix_g[p], gl, gr, sc, sd, sr, sv;
         uint32_t pos = (uint32_t)(clampi(ctl_mix_pan[p], -64, 64) + 64);

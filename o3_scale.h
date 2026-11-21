@@ -93,7 +93,7 @@ static void scale_view(void)                    /* under the knobs: an octave of
         char b[8]; sc_name(b, d);
         int cx = x1 + 21 + (int)d * 43;
         vg_round(cx - 20, y + 22, 40, 26, 4, k_sent[d][0] ? TRK_RGB[sel] : CELL2);
-        vg_text(b, cx, y + 27, VG_MED, k_sent[d][0] ? 0x0E0624 : FG, VG_CENTER);
+        vg_text(b, cx, y + 27, VG_MED, k_sent[d][0] ? 0x000000 : FG, VG_CENTER);
     }
     vg_text(set.sc_pads ? "PADS 9-16: WHITE KEYS" : "PADS 9-16: THE SCALE", x1, y + 56, VG_MED, MUTED, VG_LEFT);
 }

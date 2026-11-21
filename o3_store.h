@@ -70,6 +70,7 @@ static void store_boot(void)                    /* the settings and the programs
         if (psect_load(PS[n], &psect[n], &legacy) || psect[n].tag != PS_TAG) { memset(&psect[n], 0, sizeof psect[n]); psect[n].tag = PS_TAG; }
         else if (legacy) ps_dirty |= 1u << n;   /* (a 0.3 sector: written anew in the versioned format) */
     }
+    pk_valid = 0;
     if (st_load("settings", &set, sizeof set) || set.version != SET_VERSION) settings_defaults();
     if (set.smc_ok != SMC_OK) { memset(set.smc, 0, sizeof set.smc); memset(set.smc_n, 0, sizeof set.smc_n); set.smc_ok = SMC_OK; }   /* (0.21) */
     if (set.sc_ok != 0x5Cu) { set.sc_key = set.sc_scale = set.sc_chord = set.sc_pads = 0; set.sc_ok = 0x5Cu; }   /* (before 3.10) */
@@ -89,6 +90,9 @@ static void store_boot(void)                    /* the settings and the programs
     fx_norm(set.fx);
     if (set.io_ok != IO_OK) { set.trk_own = set.trk_daw = 0; set.midi_auto = 1; set.io_ok = IO_OK; }
     if (set.mch_ok != MCH_OK) { memset(set.trk_mch, 0, sizeof set.trk_mch); set.mch_ok = MCH_OK; }
+    if (set.eq_ok != EQ_OK) eq_defaults();
+    if (set.thr_ok != THR_OK) { memset(set.smp_thr, 0, sizeof set.smp_thr); set.thr_ok = THR_OK; }   /* (0.31) */
+    if (set.as_ok != AS_OK) { set.au_autosave = 0; set.as_ok = AS_OK; }   /* (0.31: no auto save – Sven) */      /* (0.31: settings from before the EQ – flat) */
     for (uint32_t t = 0; t < 8u; t++) if (set.trk_mch[t] > 16u) set.trk_mch[t] = 0;
 }
 
@@ -107,5 +111,6 @@ static void prog_put(uint32_t n, const patch_t *p)   /* program n is the user's 
     n %= NPROG;
     psect[n / PS_N].p[n % PS_N] = *p;
     psect[n / PS_N].used[n % PS_N] = 1;
+    pk_valid = 0;                               /* (0.31) the slots' kinds: read again */
     ps_dirty |= 1u << (n / PS_N); store_t = o3_ms;
 }

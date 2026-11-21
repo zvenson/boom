@@ -46,6 +46,7 @@ typedef struct {
     uint8_t loop[NAU], st[NAU], src[NAU], mon[NAU], dub[NAU];   /* st: the take's channels (1 = stereo) */
     uint8_t flt[NAU], cut[NAU], res[NAU], drv[NAU];   /* (3.8) the track's filter: AF_*, cutoff / resonance / drive 0..127 */
     uint32_t lps[NAU], lpe[NAU];                /* (12.11.2026) the loop's piece in frames (lpe 0: to the end) */
+    uint8_t tm[NAU];                            /* (0.32) TIME: no bars – a take begins when REC is pressed, the length is its own */
 } auctl_t;
 enum { AF_OFF, AF_LP, AF_HP, AF_BP, NAF };
 static volatile auctl_t au_c;                   /* what plays now (the main loop writes it while that pattern is the one) */
@@ -197,7 +198,7 @@ static void au_cap1(uint32_t t, uint32_t want, const float *l, const float *r, u
         if (!want) return;
         RING_TAKE();
         A->src = au_c.src[t] % NAUSRC; A->st = au_c.st[t]; A->loop = au_c.loop[t];
-        A->len0 = au_c.len[t]; A->capf = au_c.capf[t]; A->base = au_c.ptr[t]; A->end = 0; A->at = -1;
+        A->len0 = au_c.tm[t] && !(au_c.dub[t] && au_c.hi[t]) ? 0u : au_c.len[t]; A->capf = au_c.capf[t]; A->base = au_c.ptr[t]; A->end = 0; A->at = -1;
         A->dub = au_c.dub[t] && au_c.hi[t];     /* (OVERDUB onto something; an empty track: a plain take) */
         A->lat = A->src == AU_RES ? 0 : ctl_au_lat;   /* (3.8.1: one latency for the whole take – a change mid-take left holes) */
         A->wait = 1; ui_au_pos[t] = 0;
@@ -211,7 +212,7 @@ static void au_cap1(uint32_t t, uint32_t want, const float *l, const float *r, u
         if (s0 < 0) continue;
         if (A->wait) {                          /* the next bar of the pattern (its first when it starts now) */
             int32_t bar = (int32_t)song_bar_frames(quarter_len()), d0 = s0 - au_from[t];
-            A->at = au_from[t] + (d0 <= 0 ? 0 : (d0 + bar - 1) / bar * bar);
+            A->at = au_from[t] + (d0 <= 0 ? 0 : au_c.tm[t] ? d0 : (d0 + bar - 1) / bar * bar);   /* (0.32 TIME: at once) */
             if (s0 + (int32_t)CTL <= A->at) continue;
             A->wait = 0; A->on = 1;
             if (A->loop && !A->len0) au_from[t] = A->at;   /* (a new loop: it goes round from here) */

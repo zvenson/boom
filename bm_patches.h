@@ -3,21 +3,21 @@
  * 1-16 kits (DRUMS), 17-32 basses (the 808), 33-99 MEL (4-op FM); a slot without a sound of its own is that kind's INIT. */
 #define X 255
 /* ---- kits */
-static const uint8_t PK_TRAP[] = {P_TYPE, T_DRUMS, P_K_TUNE, 45, P_K_PUNCH, 80, P_K_DECAY, 70, P_K_DRIVE, 30, P_S_TUNE, 62, P_S_TONE, 75, P_S_DECAY, 55, P_S_SNAP, 90,
+static const uint8_t PK_TRAP[] = {P_TYPE, T_DRUMS, P_K_TUNE, 55, P_K_PUNCH, 85, P_K_DECAY, 58, P_K_DRIVE, 35, P_S_TUNE, 62, P_S_TONE, 75, P_S_DECAY, 55, P_S_SNAP, 90,
     P_C_SPREAD, 55, P_C_TONE, 60, P_C_DECAY, 60, P_H_TUNE, 62, P_H_TONE, 75, P_CH_DECAY, 30, P_OH_DECAY, 65, P_DL_CH, 80, X};
-static const uint8_t PK_DARK[] = {P_TYPE, T_DRUMS, P_K_TUNE, 38, P_K_PUNCH, 60, P_K_DECAY, 85, P_K_DRIVE, 50, P_S_TUNE, 50, P_S_TONE, 45, P_S_DECAY, 65, P_S_SNAP, 60,
+static const uint8_t PK_DARK[] = {P_TYPE, T_DRUMS, P_K_TUNE, 45, P_K_PUNCH, 65, P_K_DECAY, 88, P_K_DRIVE, 50, P_S_TUNE, 50, P_S_TONE, 45, P_S_DECAY, 65, P_S_SNAP, 60,
     P_C_SPREAD, 70, P_C_TONE, 40, P_C_DECAY, 75, P_H_TUNE, 45, P_H_TONE, 50, P_CH_DECAY, 25, P_OH_DECAY, 55, P_CUTOFF, 100, P_DL_CH, 70, P_DL_OH, 70, X};
-static const uint8_t PK_LOFI[] = {P_TYPE, T_DRUMS, P_K_TUNE, 55, P_K_PUNCH, 40, P_K_DECAY, 45, P_K_DRIVE, 70, P_S_TUNE, 70, P_S_TONE, 40, P_S_DECAY, 35, P_S_SNAP, 50,
+static const uint8_t PK_LOFI[] = {P_TYPE, T_DRUMS, P_K_TUNE, 60, P_K_PUNCH, 50, P_K_DECAY, 52, P_K_DRIVE, 70, P_S_TUNE, 70, P_S_TONE, 40, P_S_DECAY, 35, P_S_SNAP, 50,
     P_C_SPREAD, 40, P_C_TONE, 35, P_C_DECAY, 40, P_C_DRIVE, 60, P_H_TUNE, 40, P_H_TONE, 40, P_CH_DECAY, 20, P_OH_DECAY, 40, P_CUTOFF, 84, P_RESO, 20, X};
-static const uint8_t PK_DRILL[] = {P_TYPE, T_DRUMS, P_K_TUNE, 50, P_K_PUNCH, 95, P_K_DECAY, 40, P_K_DRIVE, 25, P_S_TUNE, 80, P_S_TONE, 100, P_S_DECAY, 30, P_S_SNAP, 110,
+static const uint8_t PK_DRILL[] = {P_TYPE, T_DRUMS, P_K_TUNE, 58, P_K_PUNCH, 95, P_K_DECAY, 56, P_K_DRIVE, 30, P_S_TUNE, 80, P_S_TONE, 100, P_S_DECAY, 30, P_S_SNAP, 110,
     P_C_SPREAD, 30, P_C_TONE, 90, P_C_DECAY, 35, P_H_TUNE, 85, P_H_TONE, 105, P_CH_DECAY, 18, P_OH_DECAY, 45, P_R_TUNE, 85, P_SN_TONE, 100, X};
-static const uint8_t PK_CLEAN[] = {P_TYPE, T_DRUMS, P_K_TUNE, 50, P_K_PUNCH, 55, P_K_DECAY, 55, P_K_DRIVE, 0, P_S_TUNE, 60, P_S_TONE, 65, P_S_DECAY, 45, P_S_SNAP, 70,
+static const uint8_t PK_CLEAN[] = {P_TYPE, T_DRUMS, P_K_TUNE, 62, P_K_PUNCH, 70, P_K_DECAY, 55, P_K_DRIVE, 10, P_S_TUNE, 60, P_S_TONE, 65, P_S_DECAY, 45, P_S_SNAP, 70,
     P_C_SPREAD, 50, P_C_TONE, 65, P_C_DECAY, 50, P_C_DRIVE, 0, P_H_TUNE, 60, P_H_TONE, 70, P_CH_DECAY, 28, P_OH_DECAY, 60, X};
-static const uint8_t PK_BOOM[] = {P_TYPE, T_DRUMS, P_K_TUNE, 30, P_K_PUNCH, 70, P_K_DECAY, 110, P_K_DRIVE, 60, P_S_TUNE, 55, P_S_TONE, 55, P_S_DECAY, 70, P_S_SNAP, 75,
+static const uint8_t PK_BOOM[] = {P_TYPE, T_DRUMS, P_K_TUNE, 40, P_K_PUNCH, 75, P_K_DECAY, 108, P_K_DRIVE, 60, P_S_TUNE, 55, P_S_TONE, 55, P_S_DECAY, 70, P_S_SNAP, 75,
     P_C_SPREAD, 60, P_C_TONE, 50, P_C_DECAY, 80, P_H_TUNE, 55, P_H_TONE, 65, P_CH_DECAY, 35, P_OH_DECAY, 80, P_P_TUNE, 35, P_P_DECAY, 70, X};
-static const uint8_t PK_TIGHT[] = {P_TYPE, T_DRUMS, P_K_TUNE, 58, P_K_PUNCH, 85, P_K_DECAY, 30, P_K_DRIVE, 15, P_S_TUNE, 75, P_S_TONE, 85, P_S_DECAY, 25, P_S_SNAP, 95,
+static const uint8_t PK_TIGHT[] = {P_TYPE, T_DRUMS, P_K_TUNE, 70, P_K_PUNCH, 90, P_K_DECAY, 38, P_K_DRIVE, 20, P_S_TUNE, 75, P_S_TONE, 85, P_S_DECAY, 25, P_S_SNAP, 95,
     P_C_SPREAD, 35, P_C_TONE, 75, P_C_DECAY, 30, P_H_TUNE, 70, P_H_TONE, 85, P_CH_DECAY, 15, P_OH_DECAY, 35, P_R_DECAY, 20, P_SN_DECAY, 25, X};
-static const uint8_t PK_METAL[] = {P_TYPE, T_DRUMS, P_K_TUNE, 48, P_K_PUNCH, 75, P_K_DECAY, 60, P_K_DRIVE, 90, P_S_TUNE, 65, P_S_TONE, 90, P_S_DECAY, 50, P_S_SNAP, 100,
+static const uint8_t PK_METAL[] = {P_TYPE, T_DRUMS, P_K_TUNE, 55, P_K_PUNCH, 80, P_K_DECAY, 60, P_K_DRIVE, 90, P_S_TUNE, 65, P_S_TONE, 90, P_S_DECAY, 50, P_S_SNAP, 100,
     P_C_SPREAD, 50, P_C_TONE, 80, P_C_DECAY, 55, P_C_DRIVE, 80, P_H_TUNE, 90, P_H_TONE, 110, P_CH_DECAY, 40, P_OH_DECAY, 90, P_P_TONE, 110, X};
 static const uint8_t PK_INIT[] = {P_TYPE, T_DRUMS, X};
 /* (0.13) the acoustic kit: TUNE 64 = as recorded, DECAY 127 = the whole sample */
@@ -345,6 +345,22 @@ static const uint8_t PI_1[] = {MI(0), X}, PI_2[] = {MI(1), X}, PI_3[] = {MI(2), 
 static const factory_t FACT_MIDI[] = {{"MIDI CH 1", PI_1}, {"MIDI CH 2", PI_2}, {"MIDI CH 3", PI_3}, {"MIDI CH 4", PI_4},
                                       {"MIDI CH 5", PI_5}, {"MIDI CH 6", PI_6}, {"MIDI CH 7", PI_7}, {"MIDI CH 8", PI_8}};
 #define NFACT_MIDI (sizeof FACT_MIDI / sizeof FACT_MIDI[0])
+/* (0.31) E-PIANO: slots 193-200 – four tine pianos, three reed pianos, one bell (names: no makers' names) */
+#define EP(m, tone, bark, bell, dec) P_TYPE, T_EP, P_EP_MODEL, m, P_EP_TONE, tone, P_EP_BARK, bark, P_EP_BELL, bell, P_EP_DECAY, dec, \
+    P_EP_TREM, 0, P_EP_RATE, 50, P_EP_STEREO, 127, P_EP_DRIVE, 0, P_EP_NOISE, 40, P_EP_VELO, 90, \
+    P_AA, 0, P_AR, 64, P_CUTOFF, 127, P_RESO, 0, P_FENV_AMT, 64, P_MODE, M_POLY, P_GLIDE, 0
+static const uint8_t PE_STAGE[] = {EP(0, 64, 60, 50, 84), P_EP_DRIVE, 18, X};
+static const uint8_t PE_SUITC[] = {EP(0, 58, 46, 44, 88), P_EP_TREM, 72, P_EP_RATE, 52, P_EP_DRIVE, 24, X};
+static const uint8_t PE_BARK[] = {EP(0, 84, 112, 40, 78), P_EP_DRIVE, 56, P_EP_NOISE, 50, P_VOLUME, 84, X};
+static const uint8_t PE_SOFT[] = {EP(0, 36, 18, 26, 92), P_EP_TREM, 34, P_EP_RATE, 34, P_CUTOFF, 104, P_AR, 70, X};
+static const uint8_t PE_BELL[] = {EP(0, 72, 30, 112, 82), P_EP_VELO, 70, X};
+static const uint8_t PE_REED[] = {EP(1, 62, 52, 56, 64), P_EP_NOISE, 46, X};
+static const uint8_t PE_RTREM[] = {EP(1, 58, 46, 50, 66), P_EP_TREM, 78, P_EP_RATE, 62, P_EP_STEREO, 0, X};
+static const uint8_t PE_DIRTY[] = {EP(1, 86, 104, 90, 60), P_EP_DRIVE, 78, P_EP_NOISE, 56, P_CUTOFF, 116, P_VOLUME, 84, X};
+static const factory_t FACT_EP[] = {{"STAGE TINE", PE_STAGE}, {"SUITCASE", PE_SUITC}, {"BARK TINE", PE_BARK}, {"SOFT TINE", PE_SOFT},
+                                    {"BELL TINE", PE_BELL}, {"REED", PE_REED}, {"REED TREM", PE_RTREM}, {"DIRTY REED", PE_DIRTY}};
+#define NFACT_EP (sizeof FACT_EP / sizeof FACT_EP[0])
+#undef EP
 #undef MI
 #undef SM
 #undef ST
@@ -358,6 +374,7 @@ static const factory_t *factory_of(uint32_t n)  /* slot n's factory sound */
     if (n < PROG_BASS0) return n < NFACT_DRUMS ? &FACT_DRUMS[n] : &FACT_DRUMS_INIT;
     if (n < PROG_MEL0) return n - PROG_BASS0 < NFACT_BASS ? &FACT_BASS[n - PROG_BASS0] : &FACT_BASS_INIT;
     if (n < PROG_SYNTH0) return n - PROG_MEL0 < NFACT_MEL ? &FACT_MEL[n - PROG_MEL0] : &FACT_MEL_INIT;
+    if (n >= PROG_EP0) return &FACT_EP[(n - PROG_EP0) % NFACT_EP];
     if (n >= PROG_MIDI0) return &FACT_MIDI[(n - PROG_MIDI0) % NFACT_MIDI];
     if (n >= PROG_SMP0) return n - PROG_SMP0 < NFACT_SMP ? &FACT_SMP[n - PROG_SMP0] : &FACT_SMP_INIT;
     if (n >= PROG_STR0) return n - PROG_STR0 < NFACT_STR ? &FACT_STR[n - PROG_STR0] : &FACT_STR_INIT;

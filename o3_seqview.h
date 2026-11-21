@@ -20,7 +20,7 @@ static void view_tabs(void)
     for (int i = 0; i < 4; i++) {
         int x = CX0 + i * COLW, on = V[i] == seq_view;
         vg_round(x, 41, COLW - 6, 26, 5, on ? KEY_RGB[CK_SEQ] : CELL);
-        vg_text(V[i] == SV_STEPS && au_is(sel) ? "CUT" : V[i] == SV_STEPS && seq_shift ? "STEP+" : V[i] == SV_TRACK && seq_shift ? "TRACK+" : SV_NAME[V[i]], x + (COLW - 6) / 2, 46, VG_MED, on ? 0x0E0624 : DIM, VG_CENTER);
+        vg_text(V[i] == SV_STEPS && au_is(sel) ? "CUT" : V[i] == SV_STEPS && seq_shift ? "STEP+" : V[i] == SV_TRACK && seq_shift ? "TRACK+" : SV_NAME[V[i]], x + (COLW - 6) / 2, 46, VG_MED, on ? 0x000000 : DIM, VG_CENTER);
     }
 }
 static void state_text(uint32_t t, int x, int y)
@@ -38,9 +38,9 @@ static void tracks_view(void)                   /* the four in view one under th
         uint32_t c = TRK_RGB[t], len = pat.trk[t].len, pos = len ? ui_seq_pos[t] % len : 0u, pw = seq_pw(t), pg = pos / pw;
         char b[24], n[PATCH_NAME + 1], l[2] = {(char)('A' + t), 0};
         vg_round(CX0, y, CW - 14, 29, 4, on ? vg_mix(BG, c, 0.22f) : CELL);
-        vg_round(CX0 + 4, y + 3, 23, 23, 3, c); vg_text(l, CX0 + 15, y + 6, VG_MED, 0x0E0624, VG_CENTER);
+        vg_round(CX0 + 4, y + 3, 23, 23, 3, c); vg_text(l, CX0 + 15, y + 6, VG_MED, 0x000000, VG_CENTER);
         if (au_is(t)) { au_row(t, y, on); state_text(t, 452, y + 6); continue; }   /* (3.7) an audio track */
-        fmt_u(b, trk_prog[t] + 1u); prog_name(trk_prog[t], n); scat(b, " "); scat(b, n);
+        fmt_u(b, prog_num(trk_prog[t])); prog_name(trk_prog[t], n); scat(b, " "); scat(b, n);
         if (trk_type(t) == T_MIDI) { b[0] = 0; scat(b, "MIDI · CH "); fmt_u(b + slen(b), live_p[t].v[P_MI_CH] % 16u + 1u); }   /* (0.30) its channel, whatever the sound's name */
         vg_text(b, CX0 + 34, y + 6, VG_MED, on ? FG : DIM, VG_LEFT);
         for (uint32_t s = 0; s < 16u; s++) {    /* the bar playing (stopped: the first) */
@@ -72,15 +72,38 @@ static void tracks_view(void)                   /* the four in view one under th
 }
 /* (BOOM 0.5) the DRUM GRID: 8 rows (KICK .. PERC) x the 16 steps of the bar shown; a hit in the drum's colour, brighter the
  * harder; a roll as ticks; the chosen row framed, the cursor's column marked, the playhead white */
+static uint32_t roll_drum(uint32_t n) { for (uint32_t d = 0; d < NDRUM; d++) if (DRUM_NOTE[d] == n) return d; return drum_of_note(n); }
+static void step_strip(uint32_t t)              /* (0.32) STEPS: the whole track in a strip above the bar – its notes, the bars,
+                                                 * the bar the pads edit framed, the cursor, the playhead */
+{
+    uint32_t len = pat.trk[t].len, pw = seq_pw(t), pg = seq_pg[t], bs = seq_bar(t), c = TRK_RGB[t];
+    const int Y = 69, H = 10;
+    if (!len) return;
+    vg_rect(CX0, Y, CW, H, CELL);
+    for (uint32_t i = 0; i < len; i++) {
+        const step_t *st = seq_step(t, i);
+        int x = CX0 + (int)((uint64_t)i * CW / len), w = (int)((uint64_t)(i + 1u) * CW / len) - (x - CX0) - (len <= 64u ? 1 : 0);
+        if (bs && i % bs == 0u && i) vg_rect(x, Y, 1, H, DIM);
+        if (st->note[0] && !(st->ratch & STEP_OFF)) vg_rect(x, Y + 2, w < 1 ? 1 : w, H - 4, trk_type(t) == T_DRUMS ? DRUM_RGB[roll_drum(st->note[0]) % NDRUM] : c);
+    }
+    {
+        int x0 = CX0 + (int)((uint64_t)(pg * pw) * CW / len), x1 = CX0 + (int)((uint64_t)((pg + 1u) * pw > len ? len : (pg + 1u) * pw) * CW / len);
+        vg_frame(x0, Y - 1, x1 - x0, H + 2, 1, FG);
+        x0 = CX0 + (int)((uint64_t)(seq_cur[t] % len) * CW / len);
+        vg_rect(x0, Y + H - 2, (int)(CW / len) > 2 ? (int)(CW / len) : 2, 2, ACCENT);   /* (the cursor) */
+    }
+    if (ctl_seq_run && ctl_trk_on >> t & 1u) vg_rect(CX0 + (int)((uint64_t)(ui_seq_pos[t] % len) * CW / len), Y, 2, H, 0xFFFFFF);
+}
 static void drum_grid_view(void)
 {
     const char *const *RN = kit_names(live_p[sel].v[P_KIT_SRC]);   /* (0.13: the acoustic kit's rows) */
     uint32_t t = sel, len = pat.trk[t].len, pg = seq_pg[t], pos = ui_seq_pos[t] % len, pw = seq_pw(t), row = drum_row[t] % NDRUM;
-    const int X0 = CX0 + 44, CWD = 26, RH = 14, Y0 = 70;
+    const int X0 = CX0 + 44, CWD = 26, RH = 12, Y0 = 83;   /* (0.32: the strip above) */
     char b[40];
+    step_strip(t);
     for (uint32_t d = 0; d < NDRUM; d++) {
         int y = Y0 + (int)d * RH, on = d == row;
-        vg_text(RN[d], CX0 + 40, y - 1, VG_SMALL, on ? DRUM_RGB[d] : MUTED, VG_RIGHT);
+        vg_text(RN[d], CX0 + 40, y - 2, VG_SMALL, on ? DRUM_RGB[d] : MUTED, VG_RIGHT);
         for (uint32_t s = 0; s < 16u; s++) {
             uint32_t i = pg * pw + s;
             int x = X0 + (int)s * CWD, q;
@@ -106,7 +129,7 @@ static void drum_grid_view(void)
     if (ctl_seq_run && ctl_trk_on >> t & 1u && seq_pages(t) > 1u) { scat(b, " \xc2\xb7 PLAYS "); fmt_u(b + slen(b), pos / pw + 1u); }
     vg_text(b, 470, 186, VG_MED, ctl_seq_run && pos / pw != pg ? ACCENT : DIM, VG_RIGHT);
     if (rec) vg_text(rec == REC_ON ? "\xe2\x97\x8f REC" : "REC ARMED", CX0, 186, VG_MED, RED, VG_LEFT);
-    else vg_text(seq_shift ? "SHIFT: RATCHET \xc2\xb7 CHANCE \xc2\xb7 ON/OFF" : "PADS = THIS DRUM'S STEPS \xc2\xb7 A KEY WRITES ITS DRUM HERE", CX0, 186, VG_MED, MUTED, VG_LEFT);
+    else vg_text(seq_shift ? "SHIFT: RATCHET \xc2\xb7 CHANCE \xc2\xb7 ON/OFF" : "DATA: STEP \xc2\xb7 PUSH: ON/OFF \xc2\xb7 PADS TOO", CX0, 186, VG_MED, MUTED, VG_LEFT);
 }
 static void steps_view(void)                    /* the cursor's bar: a kit's drum grid, else the piano roll */
 {
@@ -119,9 +142,10 @@ static void steps_view(void)                    /* the cursor's bar: a kit's dru
     uint32_t c = TRK_RGB[t], row, nr;
     uint8_t rows[ROLL_ROWS];
     int RH;
-    const int X0 = CX0 + 44, CWD = 26, Y0 = 70;
+    const int X0 = CX0 + 44, CWD = 26, Y0 = 83;   /* (0.32: the strip above) */
     char b[40];
     if (!len) { vg_text("TRACK OFF – KNOB 1 (LENGTH) SWITCHES IT ON", 240, 120, VG_MED, DIM, VG_CENTER); return; }
+    step_strip(t);
     nr = roll_rows(t, rows, &RH); row = roll_row[t];
     for (uint32_t r = 0; r < nr; r++) {
         uint32_t n = rows[r], pc = n % 12u, black = 0x54Au >> pc & 1u;   /* C# D# F# G# A# */
@@ -134,7 +158,7 @@ static void steps_view(void)                    /* the cursor's bar: a kit's dru
             int x = X0 + (int)s * CWD, q;
             const step_t *st = seq_step(t, i);
             if (i >= len || s >= pw) continue;
-            { uint32_t bm = beat_mark(t, i); vg_rect(x, y, CWD - 2, RH - 1, black ? 0x160A30 : bm == 2u ? 0x3A1866 : bm ? 0x2A1250 : CELL); }
+            { uint32_t bm = beat_mark(t, i); vg_rect(x, y, CWD - 2, RH - 1, black ? 0x0C0518 : bm == 2u ? 0x3A1866 : bm ? 0x2A1250 : CELL); }
             q = note_slot(st, n);
             if (q >= 0) {
                 uint32_t vl = st->nv[q] ? st->nv[q] : st->vel;
@@ -160,26 +184,85 @@ static void steps_view(void)                    /* the cursor's bar: a kit's dru
     if (meter_of(t)) { scat(b, " · "); scat(b, METER[meter_of(t)].name); }
     vg_text(b, 470, 186, VG_MED, ctl_seq_run && pos / pw != pg ? ACCENT : DIM, VG_RIGHT);
     if (rec) vg_text(rec == REC_ON ? "● REC" : "REC ARMED", CX0, 186, VG_MED, RED, VG_LEFT);
-    else vg_text(seq_shift ? "SHIFT: RATCHET · CHANCE · ON/OFF" : roll_fold ? "FOLD: ONLY THE NOTES USED · ENTER: ALL KEYS" : "PADS = THIS NOTE'S STEPS · ENTER: FOLD", CX0, 186, VG_MED, MUTED, VG_LEFT);
+    else vg_text(seq_shift ? "SHIFT: RATCHET · CHANCE · ON/OFF" : roll_fold ? "FOLD: ONLY THE NOTES USED · ENTER: ALL KEYS" : "DATA: STEP · PUSH: ON/OFF · ENTER: FOLD", CX0, 186, VG_MED, MUTED, VG_LEFT);
 }
-static void track_view(void)                    /* the whole track: every step, 16 to a row */
+static void tm_view(uint32_t t)                 /* (0.32) TRACK: the track as a time line, as long as it is – its notes where they
+                                                 * are played, how high, how long; the beats and bars behind them. TIME: the take,
+                                                 * the grid it would snap to, START / END. A DRUMS track: a lane a drum */
+{
+    const seqtrk_t *k = &pat.trk[t];
+    uint32_t tm = k->tm, grow = tm && (ctl_tm_grow >> t & 1u), c = TRK_RGB[t], bt = tm_beat(t), bar = tm_bar(t);
+    uint32_t fr = ui_seq_frac[t] > 255u ? 255u : ui_seq_frac[t], head;
+    uint32_t span, lo = 127u, hi = 0u, n, run = ctl_seq_run && (ctl_trk_on >> t & 1u), dr = trk_type(t) == T_DRUMS;
+    uint32_t ts = tm ? k->ts : 0u, te = tm ? k->te : k->len * TM_FINE;
+    char b[72], l[12];
+    head = (tm ? ui_seq_pos[t] % SEQ_STEPS : k->len ? ui_seq_pos[t] % k->len : 0u) * TM_FINE + fr / 2u;
+    if (!tm && !k->len) { vg_text("TRACK OFF – KNOB 1 (LENGTH) SWITCHES IT ON", 240, 120, VG_MED, DIM, VG_CENTER); return; }
+    vg_rect(CX0, 72, CW, 108, CELL);
+    if (grow) { span = head + bt; span = (span + bar - 1u) / bar * bar; if (span < bar) span = bar; }
+    else span = te ? (te > k->len * TM_FINE ? te : k->len * TM_FINE) : 0u;
+    if (grow) { vg_rect(CX0, 72, CW, 2, RED); vg_rect(CX0, 178, CW, 2, RED); }
+    if (!span) vg_text("TIME – REC RECORDS FREELY, REC AGAIN CLOSES THE LOOP", 240, 116, VG_MED, DIM, VG_CENTER);
+    else {
+        if (dr) for (uint32_t d = 1; d < NDRUM; d++) vg_rect(CX0, 78 + (int)d * 12 - 1, CW, 1, SEP);   /* (the lanes) */
+        if (span / bt <= 230u) for (uint32_t g = bt; g < span; g += bt) {   /* the beats, the bars brighter and numbered */
+            int x = CX0 + (int)((uint64_t)g * CW / span), isbar = bar && g % bar == 0u;
+            vg_rect(x, 72, isbar ? 2 : 1, 108, isbar ? DIM : MUTED);
+            if (span / bt <= 16u) { tm_bbt(t, l, g); vg_text(l, x + 3, 74, VG_SMALL, isbar ? DIM : MUTED, VG_LEFT); }   /* (few beats: each one's BAR.BEAT) */
+            else if (isbar && span / bar <= 24u) { fmt_u(l, g / bar + 1u); vg_text(l, x + 3, 74, VG_SMALL, DIM, VG_LEFT); }
+        }
+        if (!grow && (ts || te < span)) {       /* outside START - END: dimmed (drawn over the grid, under the notes) */
+            int x0 = CX0 + (int)((uint64_t)ts * CW / span), x1 = CX0 + (int)((uint64_t)te * CW / span);
+            for (int y = 72; y < 180; y += 2) { vg_rect(CX0, y, x0 - CX0, 1, BG); vg_rect(x1, y, CX0 + CW - x1, 1, BG); }
+        }
+        if (tm && !grow && te) {
+            int x0 = CX0 + (int)((uint64_t)ts * CW / span), x1 = CX0 + (int)((uint64_t)te * CW / span);
+            vg_rect(x0, 72, 2, 108, GREEN); vg_rect(x1 - 2, 72, 2, 108, RED);
+        }
+        for (uint32_t i = 0; i < k->len && i < SEQ_STEPS; i++) for (n = 0; n < SEQ_CHORD && seq_step(t, i)->note[n]; n++) {
+            uint32_t m = seq_step(t, i)->note[n]; if (m < lo) lo = m; if (m > hi) hi = m;
+        }
+        if (hi < lo) lo = hi = 60u;
+        if (hi - lo < 12u) { lo = lo > 6u ? lo - 6u : 0u; hi = lo + 12u; }
+        for (uint32_t i = 0; i < k->len && i < SEQ_STEPS; i++) {   /* the notes: where, how high, how long */
+            const step_t *st = seq_step(t, i);
+            uint32_t f = i * TM_FINE + st->nudge, gl = st->gate >= GATE_TIE ? TM_FINE : (uint32_t)st->gate * TM_FINE / 128u;
+            if (!st->note[0] || f >= span) continue;
+            for (n = 0; n < SEQ_CHORD && st->note[n]; n++) {
+                uint32_t vl = st->nv[n] ? st->nv[n] : st->vel, d = dr ? roll_drum(st->note[n]) % NDRUM : 0u, nc = dr ? DRUM_RGB[d] : c;
+                int x = CX0 + (int)((uint64_t)f * CW / span), w = (int)((uint64_t)gl * CW / span);
+                int y = dr ? 78 + (int)d * 12 + 4 : 172 - (int)((st->note[n] - lo) * 94u / (hi - lo));
+                if (dr) w = (int)((uint64_t)TM_FINE * CW / span) - 1;   /* (a drum: a hit, a step wide) */
+                if (w < 3) w = 3;
+                if (x + w > CX0 + CW) w = CX0 + CW - x;
+                vg_rect(x, y - 2, w, 5, (st->ratch & STEP_OFF) || (!grow && (f < ts || f >= te)) ? MUTED : vg_mix(BG, nc, 0.45f + 0.55f * (float)vl / 127.0f));   /* (outside the loop / OFF: not played; brighter the harder) */
+            }
+        }
+        if (run && head < span) vg_rect(CX0 + (int)((uint64_t)head * CW / span), 72, 2, 108, FG);
+    }
+    b[0] = 0;
+    if (!tm) {
+        uint32_t len = k->len, bs = seq_bar(t);
+        fmt_u(b, len); scat(b, " steps · "); fmt_u(b + slen(b), (len + bs - 1u) / bs); scat(b, (len + bs - 1u) / bs == 1u ? " bar · " : " bars · ");
+        scat(b, METER[meter_of(t)].name);
+        vg_text(b, CX0, 186, VG_MED, DIM, VG_LEFT);
+        return;
+    }
+    scat(b, "TIME · ");
+    if (grow) scat(b, "RECORDING FREE – REC CLOSES THE LOOP");
+    else if (!k->te) scat(b, "NO LOOP YET – REC RECORDS ONE");
+    else {
+        scat(b, "LOOP "); fmt_sec(b + slen(b), tm_frames(t, k->te - k->ts));
+        tm_bbt(t, l, k->ts); if (l[0]) { scat(b, " · START ON "); scat(b, l); }
+        tm_bbt(t, l, k->te); if (l[0]) { scat(b, " · END ON "); scat(b, l); }
+        else if (!seq_shift) scat(b, " · SHIFT: NO SNAP");
+    }
+    vg_text(b, CX0, 186, VG_MED, grow ? RED : DIM, VG_LEFT);
+}
+static void track_view(void)                    /* the whole track as a time line (0.32: as TIME's – Sven: "ist viel besser") */
 {
     if (au_is(sel)) { au_view(); return; }
-    uint32_t t = sel, len = pat.trk[t].len, pos = len ? ui_seq_pos[t] % len : 0u, pw = seq_pw(t), rows = (len + pw - 1u) / pw;
-    uint32_t c = TRK_RGB[t], bs = seq_bar(t);
-    int ch = rows > 8u ? 6 : rows > 4u ? 10 : 18;
-    char b[32];
-    if (!len) { vg_text("TRACK OFF – KNOB 1 (LENGTH) SWITCHES IT ON", 240, 120, VG_MED, DIM, VG_CENTER); return; }
-    for (uint32_t i = 0; i < len; i++) {
-        const step_t *st = seq_step(t, i);
-        int x = CX0 + (int)(i % pw) * CW / 16, y = 72 + (int)(i / pw) * (ch + 3);
-        uint32_t bm = beat_mark(t, i), col = st->note[0] && !(st->ratch & STEP_OFF) ? c : bm == 2u ? 0x3A1866 : bm ? 0x2A1250 : CELL;
-        if (ctl_seq_run && ctl_trk_on >> t & 1u && i == pos) col = FG;
-        vg_rect(x, y, 26, ch, col);
-    }
-    b[0] = 0; fmt_u(b, len); scat(b, " steps · "); fmt_u(b + slen(b), (len + bs - 1u) / bs); scat(b, (len + bs - 1u) / bs == 1u ? " bar · " : " bars · ");
-    scat(b, METER[meter_of(t)].name);
-    vg_text(b, CX0, 186, VG_MED, DIM, VG_LEFT);
+    tm_view(sel);
 }
 static void slots_view(void)                    /* 8 patterns a page (64 in all, 3.7): playing, next, the one chosen, used / empty */
 {

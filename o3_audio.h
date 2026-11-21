@@ -32,6 +32,7 @@ static uint32_t au_src_max(void) { int n = vibe_input_count(); return n < 2 ? 2u
 static const char *const AUM_NAME[NAUM] = {"OFF", "AUTO", "ON"};
 static const char *const INM_NAME[3] = {"LINE", "MIC", "HI-Z"};
 static void fmt_time(char *s, uint32_t frames);
+static void fmt_sec(char *s, uint32_t frames);
 static uint32_t au_rec_pat[NAU], au_rec_old[NAU], au_rec_new[NAU], au_input_on;   /* (0.29) each recording track's */
 static int au_rec_has(uint32_t k) { for (uint32_t t = 0; t < NAU; t++) if (k && au_rec_new[t] == k) return 1; return 0; }
 
@@ -45,6 +46,8 @@ typedef struct {
     uint32_t len[NAU];                          /* the track's length in frames */
     uint8_t flt[NAU], cut[NAU], res[NAU], drv[NAU];   /* (3.8) its filter: AF_*, cutoff, resonance, drive */
     uint32_t lps[NAU], lpe[NAU];                /* (12.11.2026) the loop's piece in frames: from lps to lpe (exclusive; 0: the end) */
+    uint8_t tm[NAU], tpad[2];                   /* (0.32, Sven: "Length 0 = Time Mode") 1: no bars – the track is as long as its
+                                                 * take, records from the moment REC is pressed to the moment it ends it */
 } aud_t;
 #define AUD_OLD_SZ __builtin_offsetof(aud_t, lps)         /* (a pattern saved before: its whole take loops) */
 static aud_t paud[NPAT];
@@ -56,9 +59,11 @@ static void aud_init(aud_t *a)
     for (uint32_t t = 0; t < NAU; t++) { a->loop[t] = 1; a->st[t] = 1; a->src[t] = AU_IN1; a->mon[t] = AUM_AUTO; a->cut[t] = 127; }
 }
 static void aud_touch(void) { aud_dirty |= 1ull << (set.pat % NPAT); store_t = o3_ms; }
+static int aud_tm(const aud_t *a, uint32_t t) { t %= NAU; return (a->type >> t & 1u) && a->tm[t]; }   /* (0.32) an audio track in TIME */
+static int au_tm(uint32_t t) { return aud_tm(&AU, t); }
 /* (BOOM 0.4, bm_save.h) a pattern's audio with a version: "BMFA" 1 · tracks · – · record size, the type bits, then a record
- * per track: loop st src mon dub · take (2) · len (4) · flt cut res drv · lps (4) · lpe (4) = 23 bytes */
-#define AUD_REC 23u
+ * per track: loop st src mon dub · take (2) · len (4) · flt cut res drv · lps (4) · lpe (4) · tm (0.32) = 24 bytes */
+#define AUD_REC 24u
 static void put32(uint8_t *p, uint32_t v);
 static uint32_t aud_ser(const aud_t *a, uint8_t *b)
 {
@@ -67,7 +72,7 @@ static uint32_t aud_ser(const aud_t *a, uint8_t *b)
     for (uint32_t t = 0; t < NAU; t++) {
         uint8_t *r = b + at;
         r[0] = a->loop[t]; r[1] = a->st[t]; r[2] = a->src[t]; r[3] = a->mon[t]; r[4] = a->dub[t]; r[5] = (uint8_t)a->take[t]; r[6] = (uint8_t)(a->take[t] >> 8);
-        put32(r + 7, a->len[t]); r[11] = a->flt[t]; r[12] = a->cut[t]; r[13] = a->res[t]; r[14] = a->drv[t]; put32(r + 15, a->lps[t]); put32(r + 19, a->lpe[t]);
+        put32(r + 7, a->len[t]); r[11] = a->flt[t]; r[12] = a->cut[t]; r[13] = a->res[t]; r[14] = a->drv[t]; put32(r + 15, a->lps[t]); put32(r + 19, a->lpe[t]); r[23] = a->tm[t];
         at += AUD_REC;
     }
     return at;
@@ -87,6 +92,7 @@ static int aud_des(const uint8_t *b, uint32_t len, aud_t *a)
             a->loop[t] = r[0]; a->st[t] = r[1]; a->src[t] = r[2]; a->mon[t] = r[3]; a->dub[t] = r[4]; a->take[t] = (uint16_t)(r[5] | r[6] << 8);
             a->len[t] = rd32(r + 7); a->flt[t] = r[11]; a->cut[t] = r[12]; a->res[t] = r[13]; a->drv[t] = r[14];
             if (rs >= 23u) { a->lps[t] = rd32(r + 15); a->lpe[t] = rd32(r + 19); }
+            if (rs >= 24u) a->tm[t] = r[23] ? 1u : 0u;
         }
         if (nt < NAU) a->type &= (uint8_t)((1u << nt) - 1u);
     }
@@ -100,6 +106,7 @@ typedef struct { uint32_t off, cap, hi; uint8_t st, inuse, ready, pad; } take_t;
 static take_t tk[NTAKE + 1u];                   /* [0] unused */
 static struct { uint32_t magic; struct { char path[240]; uint32_t frames; uint8_t st, pad[3]; } e[NTAKE + 1u]; } takes2;
 static uint64_t tk_save_q;                      /* bit k-1: take k's WAV to write */
+static uint64_t tk_unsaved;                     /* (0.31) bit k-1: take k lives in memory only (AUTO SAVE off, not saved by name yet) */
 static uint64_t ld_q;                           /* bit k-1: take k to load */
 static uint32_t tk_ch(uint32_t k) { return tk[k].st ? 2u : 1u; }
 static int16_t *tk_ptr(uint32_t k) { return k && k <= NTAKE && tk[k].inuse && tk[k].ready && au_arena ? au_arena + tk[k].off : 0; }
@@ -118,7 +125,7 @@ static uint32_t ld_k, sv_k, tk_hold;            /* (below: the take being loaded
 static void tk_free(uint32_t k)
 {
     if (!k || k > NTAKE) return;
-    tk[k].inuse = 0; tk[k].cap = tk[k].hi = 0; tk_save_q &= ~(1ull << (k - 1u));
+    tk[k].inuse = 0; tk[k].cap = tk[k].hi = 0; tk_save_q &= ~(1ull << (k - 1u)); tk_unsaved &= ~(1ull << (k - 1u));
     takes2.e[k].path[0] = 0; takes2.e[k].frames = 0;
 }
 static void take_gc(void)                       /* let go of the takes no pattern plays any more */
@@ -193,12 +200,13 @@ static void au_fill(auctl_t *c, const aud_t *a)
         c->src[t] = a->src[t] % NAUSRC; c->mon[t] = a->mon[t] % NAUM; c->dub[t] = a->dub[t] ? 1u : 0u;
         c->flt[t] = a->flt[t] % NAF; c->cut[t] = a->cut[t] & 127u; c->res[t] = a->res[t] & 127u; c->drv[t] = a->drv[t] & 127u;
         c->lps[t] = a->lps[t]; c->lpe[t] = a->lpe[t];
+        c->tm[t] = (c->type >> t & 1u) && a->tm[t] ? 1u : 0u;
     }
 }
 static void au_inputs(void)                     /* an audio track takes from IN 1 / IN 2: switch them on (once), their modes */
 {
     for (uint32_t t = 0; t < NAU; t++)
-        if ((AU.type >> t & 1u) && AU.src[t] % NAUSRC != AU_RES) {
+        if (((AU.type >> t & 1u) || trk_type(t) == T_SMP) && AU.src[t] % NAUSRC != AU_RES) {   /* (0.31: a SAMPLER records from the input too – before, only an audio track switched it on) */
             if (!au_input_on) { vibe_request(VIBE_REQ_AUDIO_INPUT); au_input_on = 1; }
             vibe_input_mode(0, set.au_inm[0] % 3u); vibe_input_mode(1, set.au_inm[1] % 3u);
             return;
@@ -237,6 +245,8 @@ static void au_save_poll(void)
         if (k > NTAKE || au_rec_has(k)) return;   /* (recording into it: after) */
         tk_save_q &= ~(1ull << (k - 1u));
         if (!tk[k].inuse || !tk[k].hi) return;
+        if (!tk_name_over[k][0] && !set.au_autosave) { tk_unsaved |= 1ull << (k - 1u); return; }   /* (0.31, Sven: "nix auto save") in memory until named */
+        tk_unsaved &= ~(1ull << (k - 1u));
         char name[32] = "BOOM P"; uint32_t pn = 0, tr = 0;
         for (uint32_t n = 0; n < NPAT; n++) for (uint32_t t = 0; t < NAU; t++) if (paud[n].take[t] == k) { pn = n; tr = t; n = NPAT; break; }
         fmt_u(name + slen(name), pn + 1u); { char l[3] = {' ', (char)('A' + tr), 0}; scat(name, l); } scat(name, ".wav");
@@ -373,7 +383,8 @@ static int au_rec_one(uint32_t t, uint32_t share)   /* track t: its new take (sh
 {
     uint32_t old, k, keep;
     old = au_k(t);
-    keep = old && (AU.dub[t] || !AU.loop[t] || AU.len[t]);   /* (DUB, a punch into a tape, a loop with its length: the old one in) */
+    keep = old && (AU.dub[t] || !AU.loop[t] || (AU.len[t] && !au_tm(t)));   /* (DUB, a punch into a tape, a loop with its length: the old one in;
+                                                 * TIME, NEW: a new take, as long as REC holds it) */
     k = take_new(keep ? tk[old].hi * tk_ch(old) : 1u, (int)share, old ? tk[old].st : AU.st[t]);
     if (!k) return 0;
     if (keep) { memcpy(au_arena + tk[k].off, au_arena + tk[old].off, (size_t)tk[old].hi * tk_ch(old) * sizeof(int16_t)); tk[k].hi = tk[old].hi; }
@@ -415,7 +426,8 @@ static void au_rec_start_m(uint32_t m)          /* (0.29) the tracks in m record
         ctl_seq_restart = 1; ctl_seq_run = 1;
         if (set.midi_out || midi_trk_any()) vibe_transport_out(1);
         say_mask(m, n > 1u ? "RECORD FROM BAR 1" : "RECORDS FROM BAR 1");
-    } else say_mask(m, n > 1u ? "RECORD ON THE NEXT BAR" : "RECORDS ON THE NEXT BAR");
+    } else if (n == 1u && au_tm(sel) && m == 1u << sel) say_mask(m, "RECORDS NOW (TIME) – REC ENDS IT");
+    else say_mask(m, n > 1u ? "RECORD ON THE NEXT BAR" : "RECORDS ON THE NEXT BAR");
 }
 static void au_rec_start(uint32_t t) { au_rec_start_m(1u << (t % NAU)); }
 static void au_rec_stop(void) { au_arm = 0; ctl_au_rq = 0; }
@@ -432,7 +444,13 @@ static void au_rec_press(void)                  /* REC tapped: the armed audio t
     if (au_arm) { au_arm = 0; say("REC OFF"); return; }
     m = au_rec_set();
     if (!m) return;
-    if (m == 1u << sel && trk_type(sel) == T_SMP && !(AU.type >> sel & 1u)) { AU.loop[sel] = 1; AU.len[sel] = 0; AU.dub[sel] = 0; }   /* (0.20) a sample: free length, REC again ends it */
+    if (m == 1u << sel && trk_type(sel) == T_SMP && !(AU.type >> sel & 1u)) {   /* (0.20) a sample: free length, REC again ends it */
+        AU.loop[sel] = 1; AU.len[sel] = 0; AU.dub[sel] = 0;
+        { int ii = au_src_in(AU.src[sel % NAU]), ni = vibe_input_count(); if (ni < 2) ni = 2;
+          if (ii >= ni) { AU.src[sel % NAU] = AU_IN1; AU.st[sel % NAU] = 0; aud_touch(); au_apply(); say("THAT INPUT IS NOT THERE – RECORDING IN 1"); } }   /* (0.31: an IN 3 from the XR18 days on the VIBE alone: silence) */
+        au_inputs();                            /* (0.31, Sven: "live sampeln geht nicht") the input on, and it records NOW – stopped, the */
+        au_rec_start_m(m); return;              /*  transport starts from bar 1 with it (before: REC only armed, a second REC disarmed it) */
+    }
     if (ctl_seq_run) au_rec_start_m(m);
     else { au_arm = m; say_mask(m, "ARMED: PLAY RECORDS FROM BAR 1"); }
 }
@@ -450,6 +468,7 @@ static void au_arm_toggle(uint32_t t)           /* (0.29) REC held + the track's
         say_trk(b, t);
     }
 }
+static void smp_after_take(uint32_t t);         /* (bm_sampler.h) */
 static void au_take_done(uint32_t t)            /* (the draw) the audio flow ended track t's take: its length, its block, saved */
 {
     static char msg[40];
@@ -469,12 +488,18 @@ static void au_take_done(uint32_t t)            /* (the draw) the audio flow end
     else if (!len) len = au_up(end);            /* a new loop: whole bars */
     if (end > tk[k].hi) tk[k].hi = end;
     take_trim(k, tk[k].hi);
+    if (aud_tm(a, t)) {                         /* (0.32) TIME: exactly as long as the take, the loop's piece all of it again */
+        len = tk[k].hi;
+        if (!(a->dub[t] && au_rec_old[t])) { a->lps[t] = 0; a->lpe[t] = 0; }
+    }
     a->len[t] = len; aud_dirty |= 1ull << (au_rec_pat[t] % NPAT); store_t = o3_ms;
     tk_save_q |= 1ull << (k - 1u);
     take_gc(); au_apply();
     msg[0] = 0; scat(msg, "TRACK "); { char l[2] = {(char)('A' + t), 0}; scat(msg, l); }
-    if (!(a->type >> t & 1u)) { scat(msg, ": SAMPLE · "); fmt_time(msg + slen(msg), tk[k].hi); say(msg); return; }   /* (0.20) a sampler's own sample */
-    scat(msg, " RECORDED · "); fmt_u(msg + slen(msg), (len + au_bar() / 2u) / au_bar()); scat(msg, " BARS");
+    if (!(a->type >> t & 1u)) { scat(msg, ": SAMPLE · "); fmt_time(msg + slen(msg), tk[k].hi); if (!set.au_autosave) scat(msg, " · NOT SAVED"); say(msg); smp_after_take(t); return; }   /* (0.20) a sampler's own sample – (0.31) its threshold */
+    scat(msg, " RECORDED · ");
+    if (aud_tm(a, t)) { fmt_sec(msg + slen(msg), len); scat(msg, " (TIME)"); }
+    else { fmt_u(msg + slen(msg), (len + au_bar() / 2u) / au_bar()); scat(msg, " BARS"); }
     say(msg);
 }
 static void au_clear(uint32_t t)                /* REC held / SHIFT + REC: the take gone (from this pattern) */
@@ -514,6 +539,15 @@ static void fmt_time(char *s, uint32_t frames)  /* m:ss */
     char b[4];
     fmt_u(s, sec / 60u); scat(s, ":"); b[0] = (char)('0' + sec % 60u / 10u); b[1] = (char)('0' + sec % 10u); b[2] = 0; scat(s, b);
 }
+static void fmt_sec(char *s, uint32_t frames)   /* (0.32 TIME) seconds and ms: 3.042s */
+{
+    uint32_t fs = obv_fs ? obv_fs : 48000u, ms = (uint32_t)((uint64_t)frames * 1000u / fs);
+    char b[5];
+    s[0] = 0; fmt_u(s, ms / 1000u); b[0] = '.'; b[1] = (char)('0' + ms / 100u % 10u); b[2] = (char)('0' + ms / 10u % 10u); b[3] = (char)('0' + ms % 10u); b[4] = 0;
+    scat(s, b); scat(s, "s");
+}
+static void fmt_pos(char *s, uint32_t f);
+static void fmt_tpos(uint32_t t, char *s, uint32_t f) { if (au_tm(t)) fmt_sec(s, f); else fmt_pos(s, f); }   /* (TIME: no bars to count in) */
 enum { AK_TYPE, AK_CH, AK_INM, AK_MON, AK_SRC, AK_LVL, AK_BARS, AK_MODE, AK_DUB, AK_FROM, AK_TO, AK_ACT, AK_DO, AK_FLT, AK_CUT, AK_RES, AK_DRV, AK_GAIN, AK_LS, AK_LE, AK_PLAYS, AK_OUT, AK_MIN, AK_NONE };   /* (0.24: MIN = MIDI IN) */   /* (BOOM 0.4: PLAYS seq / DAW, OUT main / its own) */
 static const char *const AF_NAME[NAF] = {"OFF", "LP", "HP", "BP"};
 /* (3.7, Sven 9.11.) the SOUND key's pages: a synth track has its seven and TYPE last; an audio track has AUDIO, TAKE,
@@ -585,8 +619,8 @@ static void au_cut_do(uint32_t t)
         AU.len[t] = d; cut_from[t] = 0; cut_to[t] = d;
     }
     aud_touch(); au_apply(); tk_save_q |= 1ull << (k - 1u);
-    msg[0] = 0; scat(msg, CUT_NAME[cut_act % NCUT]); scat(msg, " "); fmt_pos(msg + slen(msg), cut_from[t]); scat(msg, " - ");
-    fmt_pos(msg + slen(msg), cut_to[t]); scat(msg, ": DONE"); say(msg);
+    msg[0] = 0; scat(msg, CUT_NAME[cut_act % NCUT]); scat(msg, " "); fmt_tpos(t, msg + slen(msg), cut_from[t]); scat(msg, " - ");
+    fmt_tpos(t, msg + slen(msg), cut_to[t]); scat(msg, ": DONE"); say(msg);
 }
 static uint32_t au_lp_e(uint32_t t) { uint32_t n = AU.len[t], e = AU.lpe[t]; return !e || e > n ? n : e; }   /* the loop's end (frames, exclusive) */
 static uint32_t au_lp_s(uint32_t t) { uint32_t e = au_lp_e(t); return AU.lps[t] < e ? AU.lps[t] : (e ? e - 1u : 0u); }
@@ -634,12 +668,12 @@ static int au_knobs(knob_t *k)
         case AK_LVL: fmt_u(v, set.mix_lvl[t]); k[i].v = set.mix_lvl[t] / 127.0f; break;
         case AK_BARS: {
             uint32_t len = AU.len[t], b = au_bar();
-            if (!len) scat(v, "FREE"); else fmt_u(v, (len + b / 2u) / b);
-            k[i].v = len ? (float)len / (float)(b * 64u) : 0.0f;
+            if (au_tm(t)) scat(v, "TIME"); else if (!len) scat(v, "FREE"); else fmt_u(v, (len + b / 2u) / b);
+            k[i].v = len && !au_tm(t) ? (float)len / (float)(b * 64u) : 0.0f;
             break; }
         case AK_DUB: scat(v, AU.dub[t] ? "DUB" : "NEW"); k[i].v = AU.dub[t] ? 1.0f : 0.0f; break;
-        case AK_FROM: fmt_pos(v, cut_from[t]); k[i].v = sp ? (float)cut_from[t] / (float)sp : 0.0f; break;
-        case AK_TO: fmt_pos(v, cut_to[t]); k[i].v = sp ? (float)cut_to[t] / (float)sp : 0.0f; break;
+        case AK_FROM: fmt_tpos(t, v, cut_from[t]); k[i].v = sp ? (float)cut_from[t] / (float)sp : 0.0f; break;
+        case AK_TO: fmt_tpos(t, v, cut_to[t]); k[i].v = sp ? (float)cut_to[t] / (float)sp : 0.0f; break;
         case AK_ACT: scat(v, CUT_NAME[cut_act % NCUT]); k[i].v = (float)(cut_act % NCUT) / (NCUT - 1); break;
         case AK_DO: scat(v, cut_arm == t + 1u && o3_ms - cut_arm_t < 3000u ? "AGAIN" : "TURN"); break;
         case AK_FLT: scat(v, AF_NAME[AU.flt[t] % NAF]); k[i].v = (float)(AU.flt[t] % NAF) / (NAF - 1); break;
@@ -653,7 +687,7 @@ static int au_knobs(knob_t *k)
         case AK_LS: case AK_LE: {               /* (the loop's piece, in bars of the song's meter) */
             uint32_t nb = AU.len[t], s0 = au_lp_s(t), e0 = au_lp_e(t);
             if (!nb) { scat(v, "--"); break; }
-            fmt_pos(v, a[i] == AK_LS ? s0 : e0);
+            fmt_tpos(t, v, a[i] == AK_LS ? s0 : e0);
             k[i].v = (float)(a[i] == AK_LS ? s0 : e0) / (float)nb; break; }
         case AK_PLAYS: if (AU.type >> t & 1u) scat(v, "--"); else { scat(v, set.trk_daw >> t & 1u ? "DAW" : "SEQ"); k[i].v = (float)(set.trk_daw >> t & 1u); } break;
         case AK_OUT: if (!(set.trk_own >> t & 1u)) scat(v, "MAIN"); else { fmt_u(v, 3u + 2u * t); scat(v, "/"); fmt_u(v + slen(v), 4u + 2u * t); if ((uint32_t)vibe_output_count() < 4u + 2u * t) scat(v, "?"); }
@@ -673,12 +707,12 @@ static int au_turn(uint32_t knob, int32_t e)
     if (au_lay < 0 && !au_plus() && !au_here()) return 0;
     au_layout(a);
     switch (a[knob & 3u]) {
-    case AK_TYPE: {                             /* DRUMS → BASS → MEL → AUDIO */
+    case AK_TYPE: {                             /* DRUMS → BASS → MEL → … → MIDI → E-PIANO → AUDIO */
         int au = (int)(AU.type >> t & 1u); int32_t cur = au ? (int32_t)NTYPE : (int32_t)trk_type(t), nx = clampi(cur + sg, 0, (int32_t)NTYPE);
         if (nx == cur) return 1;
         if (nx == (int32_t)NTYPE) { au_type_toggle(t); return 1; }
         if (au) au_type_toggle(t);
-        trk_set_type(t, (uint32_t)nx); set_touch(); say_trk(nx == T_DRUMS ? ": DRUMS" : nx == T_BASS ? ": BASS (808)" : nx == T_MEL ? ": MEL (FM)" : nx == T_SYNTH ? ": OBERVAVE" : nx == T_DX ? ": DX" : nx == T_STR ? ": STRINGS" : nx == T_SMP ? ": SAMPLER" : ": MIDI – ONLY OUT, CH ON THE MIDI PAGE", t);
+        trk_set_type(t, (uint32_t)nx); set_touch(); say_trk(nx == T_DRUMS ? ": DRUMS" : nx == T_BASS ? ": BASS (808)" : nx == T_MEL ? ": MEL (FM)" : nx == T_SYNTH ? ": OBERVAVE" : nx == T_DX ? ": DX" : nx == T_STR ? ": STRINGS" : nx == T_SMP ? ": SAMPLER" : nx == T_EP ? ": E-PIANO" : ": MIDI – ONLY OUT, CH ON THE MIDI PAGE", t);
         return 1; }
     case AK_PLAYS: if (AU.type >> t & 1u) return 1;
         set.trk_daw = (uint8_t)(e > 0 ? set.trk_daw | 1u << t : set.trk_daw & ~(1u << t)); mix_apply(); set_touch();
@@ -717,10 +751,27 @@ static int au_turn(uint32_t knob, int32_t e)
         if (au_c.src[t] != AU.src[t] && vibe_input_name(au_src_in(AU.src[t]))[0] && au_src_in(AU.src[t]) >= 2) say(vibe_input_name(au_src_in(AU.src[t])));
         break; }
     case AK_LVL: set.mix_lvl[t] = (uint8_t)clampi((int32_t)set.mix_lvl[t] + e * 2, 0, 127); mix_apply(); set_touch(); return 1;
-    case AK_BARS: {
-        uint32_t b = au_bar(), bars = (AU.len[t] + b / 2u) / b;
-        int32_t nb = (int32_t)bars + (e > 1 || e < -1 ? e * 4 : e);
-        AU.len[t] = (uint32_t)clampi(nb, 0, 999) * b;
+    case AK_BARS: {                             /* (0.32, Sven: "Length 0 = Time Mode") below 1 bar: TIME – no bars, the track as long
+                                                 * as its take, START / END anywhere in it. Without a take: TIME below FREE */
+        uint32_t b = au_bar(), bars = (AU.len[t] + b / 2u) / b, kk = au_k(t), hi = kk ? tk[kk].hi : 0u;
+        int32_t lo = hi ? 0 : -1, cur = au_tm(t) ? lo : (int32_t)bars, nb;
+        if (!(AU.type >> t & 1u)) return 1;
+        if (ctl_au_rq >> t & 1u) { say("NOT WHILE IT RECORDS"); return 1; }
+        nb = clampi(cur + (e > 1 || e < -1 ? e * 4 : e), lo, 999);
+        if (nb == cur && !(hi && !au_tm(t) && cur == 0 && e < 0)) return 1;   /* (a take on FREE: down to TIME still) */
+        if (nb == lo && hi) nb = -1;           /* (a take: 0 is TIME, there is no FREE) */
+        if (au_tm(t) && hi && e > 0) {          /* out of TIME: the bars nearest the take */
+            uint32_t n = (hi + b / 2u) / b; nb = (int32_t)(n ? n : 1u) + (e > 1 ? 4 * (e - 1) : 0);
+        }
+        if (nb < 0) {
+            AU.tm[t] = 1; AU.len[t] = hi;
+            say_trk(hi ? ": TIME – AS LONG AS THE TAKE, NO BARS · START / END MOVE IT" : ": TIME – REC RECORDS AT ONCE, REC AGAIN ENDS IT", t);
+        } else {
+            if (au_tm(t)) say_trk(": BARS AGAIN", t);
+            AU.tm[t] = 0; AU.len[t] = (uint32_t)nb * b;
+        }
+        if (AU.lpe[t] >= AU.len[t]) AU.lpe[t] = 0;
+        if (AU.lps[t] >= au_lp_e(t)) AU.lps[t] = 0;
         break; }
     case AK_DUB: AU.dub[t] = e > 0; break;
     case AK_LS: case AK_LE: {                   /* free (Sven: "auf den Nulldurchgang schneiden"): turned slowly a detent goes to
@@ -736,7 +787,18 @@ static int au_turn(uint32_t knob, int32_t e)
         v = (int64_t)(ls ? s0 : e0) + e * step;
         if (v < lo) v = lo;
         if (v > hi) v = hi;
+        {   /* (0.32 TIME) a beat it passes holds it (the grid the take would fit, Sven); SHIFT: free */
+            static uint32_t snap_t;
+            int64_t o = (int64_t)(ls ? s0 : e0), q = (int64_t)quarter_len(), bt = METER[meter_of(0)].den8 ? q / 2 : q, g;
+            if (au_tm(t) && !seq_shift && bt > 0 && o % bt == 0 && o3_ms - snap_t < 200u) return 1;   /* (on a beat it holds a moment) */
+            if (au_tm(t) && !seq_shift && bt > 0 && v != o) {
+                g = v > o ? (o / bt + 1) * bt : (o - 1) / bt * bt;
+                if (o == 0 && v < o) g = -1;
+                if (g >= lo && g <= hi && (v > o ? g <= v : g >= v)) { v = g; snap_t = o3_ms; goto lp_set; }
+            }
+        }
         if (!seq_shift && v > lo && v < hi) v = au_zc(t, (uint32_t)v, sg, (uint32_t)lo, (uint32_t)hi);
+    lp_set:
         if (ls) AU.lps[t] = (uint32_t)v; else AU.lpe[t] = (uint32_t)v >= nb ? 0u : (uint32_t)v;
         break; }
     case AK_FLT: AU.flt[t] = (uint8_t)clampi((int32_t)(AU.flt[t] % NAF) + sg, 0, NAF - 1); break;
@@ -749,8 +811,9 @@ static int au_turn(uint32_t knob, int32_t e)
     case AK_FROM: case AK_TO: {                 /* a sixteenth a detent, a bar on a fast turn, 1 ms with SHIFT; FROM before TO */
         uint32_t *c = a[knob & 3u] == AK_FROM ? &cut_from[t] : &cut_to[t], sp = au_span(t), q = quarter_len();
         int64_t step = seq_shift ? (int64_t)(obv_fs / 1000u) : (e > 1 || e < -1) ? (int64_t)song_bar_frames(q) : (int64_t)(q / 4u);
+        if (au_tm(t) && !seq_shift) step = (int64_t)(obv_fs / 1000u) * ((e > 1 || e < -1) ? 250 : 10);   /* (0.32 TIME: 10 ms, fast 250 ms – no grid) */
         int64_t v = (int64_t)*c + (seq_shift || (e <= 1 && e >= -1) ? e : sg) * step;
-        if (!seq_shift && !(e > 1 || e < -1)) { int64_t six = q / 4u ? q / 4u : 1; v = (v + (e > 0 ? 0 : six - 1)) / six * six; }   /* (onto the grid) */
+        if (!seq_shift && !au_tm(t) && !(e > 1 || e < -1)) { int64_t six = q / 4u ? q / 4u : 1; v = (v + (e > 0 ? 0 : six - 1)) / six * six; }   /* (onto the grid) */
         *c = (uint32_t)(v < 0 ? 0 : v > (int64_t)sp ? sp : v);
         if (cut_from[t] >= cut_to[t]) { if (c == &cut_from[t]) cut_to[t] = cut_from[t] + 1u > sp ? sp : cut_from[t] + 1u; else cut_from[t] = cut_to[t] ? cut_to[t] - 1u : 0u; }
         cut_arm = 0;
@@ -817,7 +880,8 @@ static void au_row(uint32_t t, int y, int on)   /* TRACKS: one audio track's row
     if (span) {
         au_wave(t, 178, y + 5, 190, 19, span, recn ? RED : c);
         if (head != 0xFFFFFFFFu && head < span) vg_rect(178 + (int)((uint64_t)head * 190u / span), y + 3, 2, 23, FG);
-        fmt_u(b, (AU.len[t] + au_bar() / 2u) / au_bar()); scat(b, AU.loop[t] ? " LP" : " BR");
+        if (au_tm(t)) { b[0] = 0; scat(b, "TIME"); }   /* (0.32) */
+        else { fmt_u(b, (AU.len[t] + au_bar() / 2u) / au_bar()); scat(b, AU.loop[t] ? " LP" : " BR"); }
     } else { b[0] = 0; scat(b, recn ? "REC" : "EMPTY"); }
     if (recn) vg_circle(172, y + 14, 4, aur[t].on || blink() ? RED : 0x7A1040);
     else if (arm) vg_circle(172, y + 14, 4, 0x8A1030);
@@ -828,13 +892,25 @@ static void au_view(void)                       /* STEPS (CUT) / TRACK of an aud
     char b[64];
     uint32_t t = sel % NAU, c = TRK_RGB[t], span = au_span(t), head = au_head(t), bar = au_bar(), k = au_k(t);
     uint32_t recn = (uint32_t)au_recn(t), arm = au_armed() >> t & 1u;
+    int lp_x0 = 0, lp_x1 = 0;
     vg_rect(CX0, 72, CW, 108, CELL);
     if (arm) { vg_rect(CX0, 72, CW, 2, RED); vg_rect(CX0, 178, CW, 2, RED); vg_rect(CX0, 72, 2, 108, RED); vg_rect(CX0 + CW - 2, 72, 2, 108, RED); }   /* (0.29) ARMED: a red frame */
     if (!span) vg_text(recn ? "WAITING FOR THE BAR ..." : "EMPTY – REC RECORDS ONTO IT", 240, 116, VG_MED, recn ? RED : DIM, VG_CENTER);
     else {
         uint32_t bars = (span + bar - 1u) / bar;
-        if (bars <= 64u) for (uint32_t i = 1; i < bars; i++)
-            vg_rect(CX0 + (int)((uint64_t)i * bar * CW / span), 72, 1, 108, i % 4u ? SEP : CELL2);
+        {   /* (0.32, as the note tracks' TRACK) the beats, the bars brighter and numbered – in TIME the grid the take would fit */
+            uint32_t q = quarter_len(), bt = METER[meter_of(0)].den8 ? q / 2u : q, bpb;
+            char l[12];
+            if (!bt) bt = 1u;
+            bpb = bar / bt ? bar / bt : 1u;
+            if (span / bt <= 230u) for (uint32_t g = bt, n = 1; g < span; g += bt, n++) {
+                int x = CX0 + (int)((uint64_t)g * CW / span), isbar = n % bpb == 0u;
+                vg_rect(x, 72, isbar ? 2 : 1, 108, isbar ? DIM : MUTED);
+                if (span / bt <= 16u) { fmt_u(l, n / bpb + 1u); scat(l, "."); fmt_u(l + slen(l), n % bpb + 1u); vg_text(l, x + 3, 74, VG_SMALL, isbar ? DIM : MUTED, VG_LEFT); }
+                else if (isbar && bars <= 24u) { fmt_u(l, n / bpb + 1u); vg_text(l, x + 3, 74, VG_SMALL, DIM, VG_LEFT); }
+            }
+            else if (bars <= 64u) for (uint32_t i = 1; i < bars; i++) vg_rect(CX0 + (int)((uint64_t)i * bar * CW / span), 72, 2, 108, DIM);
+        }
         if (SV_ENTRY(seq_view) && cut_to[t] > cut_from[t]) {   /* CUT: the piece chosen */
             uint32_t x0 = (uint32_t)((uint64_t)cut_from[t] * CW / span), x1 = (uint32_t)((uint64_t)cut_to[t] * CW / span);
             if (x1 > (uint32_t)CW) x1 = CW;
@@ -842,14 +918,17 @@ static void au_view(void)                       /* STEPS (CUT) / TRACK of an aud
             vg_rect(CX0 + (int)x0, 72, (int)(x1 - x0), 108, vg_mix(CELL, ACCENT, 0.25f));
             vg_rect(CX0 + (int)x0, 72, 1, 108, ACCENT); vg_rect(CX0 + (int)x1 - 1, 72, 1, 108, ACCENT);
         }
-        if (!SV_ENTRY(seq_view) && AU.len[t] && (au_lp_s(t) || au_lp_e(t) < AU.len[t])) {   /* TRACK: the loop's piece */
-            uint32_t x0 = (uint32_t)((uint64_t)au_lp_s(t) * CW / span), x1 = (uint32_t)((uint64_t)au_lp_e(t) * CW / span);
-            if (x1 > (uint32_t)CW) x1 = CW;
-            if (x1 <= x0) x1 = x0 + 1u;
-            vg_rect(CX0 + (int)x0, 72, (int)(x1 - x0), 108, vg_mix(CELL, c, 0.22f));
-            vg_rect(CX0 + (int)x0, 72, 2, 108, c); vg_rect(CX0 + (int)x1 - 2, 72, 2, 108, c);
+        if (!SV_ENTRY(seq_view) && AU.len[t] && (au_lp_s(t) || au_lp_e(t) < AU.len[t])) {   /* TRACK: the loop's piece – outside it dimmed, START green, END red */
+            int x0 = CX0 + (int)((uint64_t)au_lp_s(t) * CW / span), x1 = CX0 + (int)((uint64_t)au_lp_e(t) * CW / span);
+            if (x1 > CX0 + CW) x1 = CX0 + CW;
+            if (x1 <= x0) x1 = x0 + 1;
+            lp_x0 = x0; lp_x1 = x1;
         }
         au_wave(t, CX0, 76, CW, 100, span, aur[t].on ? RED : c);
+        if (lp_x1 > lp_x0) {                    /* (over the wave: the part not played hatched, the edges) */
+            for (int y = 72; y < 180; y += 2) { vg_rect(CX0, y, lp_x0 - CX0, 1, BG); vg_rect(lp_x1, y, CX0 + CW - lp_x1, 1, BG); }
+            vg_rect(lp_x0, 72, 2, 108, GREEN); vg_rect(lp_x1 - 2, 72, 2, 108, RED);
+        }
         if (head != 0xFFFFFFFFu && head < span) vg_rect(CX0 + (int)((uint64_t)head * CW / span), 72, 2, 108, FG);
     }
     b[0] = 0;
@@ -859,13 +938,15 @@ static void au_view(void)                       /* STEPS (CUT) / TRACK of an aud
     else if (k && ld_k == k) { scat(b, "LOADING "); fmt_u(b + slen(b), ld.bytes ? (uint32_t)((uint64_t)ld.off * 100u / ld.bytes) : 0u); scat(b, "%"); }
     else if (k && sv_k == k) { scat(b, "SAVING "); fmt_u(b + slen(b), (uint32_t)((uint64_t)sv.off * 100u / sv.total)); scat(b, "%"); }
     else if (SV_ENTRY(seq_view)) {
-        scat(b, "CUT "); fmt_pos(b + slen(b), cut_from[t]); scat(b, " - "); fmt_pos(b + slen(b), cut_to[t]);
+        scat(b, "CUT "); fmt_tpos(t, b + slen(b), cut_from[t]); scat(b, " - "); fmt_tpos(t, b + slen(b), cut_to[t]);
         scat(b, " · "); scat(b, CUT_NAME[cut_act % NCUT]);
     }
     else {
         scat(b, AU.loop[t] ? "LOOP · " : "ONCE · ");
-        fmt_u(b + slen(b), (AU.len[t] + bar / 2u) / bar); scat(b, " BARS · ");
-        if (AU.len[t] && (au_lp_s(t) || au_lp_e(t) < AU.len[t])) { char p[24]; scat(b, "PLAYS "); fmt_pos(p, au_lp_s(t)); scat(b, p); scat(b, " - "); fmt_pos(p, au_lp_e(t)); scat(b, p); }
+        if (au_tm(t)) scat(b, "TIME · ");       /* (0.32) */
+        else { fmt_u(b + slen(b), (AU.len[t] + bar / 2u) / bar); scat(b, " BARS · "); }
+        if (AU.len[t] && (au_lp_s(t) || au_lp_e(t) < AU.len[t])) { char p[24]; scat(b, "PLAYS "); fmt_tpos(t, p, au_lp_s(t)); scat(b, p); scat(b, " - "); fmt_tpos(t, p, au_lp_e(t)); scat(b, p); }
+        else if (au_tm(t)) fmt_sec(b + slen(b), AU.len[t]);
         else fmt_time(b + slen(b), AU.len[t]);
         scat(b, au_stt(t) ? " · STEREO" : " · MONO");
     }
@@ -900,7 +981,8 @@ static void snd_under(uint32_t sx)              /* below the knobs: the take, or
                                               "DX: a DX7 voice – 6 operators, 32 algorithms, 4 macros; LOAD takes .syx banks.",
                                               "STRINGS: a string ensemble – 16', 8', 4' registers and the ensemble (8 voices).",
                                               "SAMPLER: its own sample (REC on it, or LOAD) – PLAY it over the keys, or CHOP it.",
-                                              "MIDI: silent here – its notes, program and 4 CCs go out to a device on its channel."};
+                                              "MIDI: silent here – its notes, program and 4 CCs go out to a device on its channel.",
+                                              "E-PIANO: tines or reeds, a pickup that barks, the tremolo (8 voices)."};
         vg_text(AU.type >> t & 1u ? "AUDIO: the track plays what was recorded or loaded onto it." : TT[trk_type(t)], 240, 214, VG_MED, DIM, VG_CENTER);
         vg_text("KNOB 1: the kind – in this pattern · a new kind loads its first sound", 240, 236, VG_MED, MUTED, VG_CENTER);
         vg_text("PLAYS: SEQ / DAW · OUT: own output · MIDI IN: CH n = always that channel", 240, 256, VG_SMALL, MUTED, VG_CENTER);

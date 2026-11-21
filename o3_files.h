@@ -301,9 +301,20 @@ static void wav_load_end(int ok)
     wl.on = 0; tk_hold = 0;
     if (ok && wl.out && k) {                    /* the new take is the track's (in the pattern it was loaded in) */
         tk[k].hi = wl.out; take_trim(k, wl.out);
-        a->take[t] = (uint16_t)k; a->len[t] = au_up(wl.out);
+        a->take[t] = (uint16_t)k; a->len[t] = aud_tm(a, t) ? wl.out : au_up(wl.out);   /* (0.32 TIME: its own length) */
         aud_dirty |= 1ull << (wl.pat % NPAT); store_t = o3_ms;
-        tk_save_q |= 1ull << (k - 1u);
+        {   /* (0.31, Sven: no copies piling up) a WAV in our own format: the take IS that file – no copy, its name shown.
+             * Another format (converted): written once, under the file's own name (not "BOOM P13 A") */
+            const char *bn = wl.path; for (const char *q = wl.path; *q; q++) if (*q == '/') bn = q + 1;
+            if (wl.fmt == 1u && wl.bits == 16u && wl.rate == obv_fs && (wl.ch == 1u || wl.ch == 2u) && (wl.ch == 2u) == (tk[k].st != 0u) && slen(wl.path) < sizeof takes2.e[0].path) {
+                memcpy(takes2.e[k].path, wl.path, slen(wl.path) + 1u); takes2.e[k].frames = wl.out; takes2.e[k].st = tk[k].st; takes2_save();
+                tk_unsaved &= ~(1ull << (k - 1u));
+            } else {
+                uint32_t j = 0; tk_name_over[k][0] = 0;
+                while (bn[j] && j + 1u < sizeof tk_name_over[k]) { tk_name_over[k][j] = bn[j]; j++; } tk_name_over[k][j] = 0;
+                tk_save_q |= 1ull << (k - 1u);
+            }
+        }
         take_gc();
         msg[0] = 0; scat(msg, "P"); fmt_u(msg + slen(msg), wl.pat % NPAT + 1u); scat(msg, " TRACK "); { char l[2] = {(char)('A' + t), 0}; scat(msg, l); } scat(msg, ": WAV LOADED · "); fmt_time(msg + slen(msg), wl.out);
         if (wl.rate != obv_fs) scat(msg, " (RATE CONVERTED)");
@@ -735,8 +746,8 @@ static void files_enter(void)
         for (const char *q = f_ent[f_cur].name; *q >= '0' && *q <= '9'; q++) k = k * 10u + (uint32_t)(*q - '0');
         if (!k || k > NTAKE || !tk[k].inuse) { f_stale = 1; return; }
         if (ctl_au_rq && n == set.pat % NPAT) { say("NOT WHILE A TAKE IS RECORDED"); return; }
-        if (!(a->type >> t & 1u)) { a->type |= (uint8_t)(1u << t); if (n == set.pat % NPAT) ctl_panic = 1; }
-        a->take[t] = (uint16_t)k; a->st[t] = tk[k].st; a->len[t] = au_up(tk[k].hi);
+        if (!(a->type >> t & 1u) && !(n == set.pat % NPAT && trk_type(t) == T_SMP)) { a->type |= (uint8_t)(1u << t); if (n == set.pat % NPAT) ctl_panic = 1; }   /* (0.31: onto a SAMPLER its sample – as a WAV loaded onto it) */
+        a->take[t] = (uint16_t)k; a->st[t] = tk[k].st; a->len[t] = aud_tm(a, t) ? tk[k].hi : au_up(tk[k].hi);
         aud_dirty |= 1ull << n; store_t = o3_ms; if (n == set.pat % NPAT) au_apply(); take_gc(); f_stale = 1;
         { static char m[48]; m[0] = 0; scat(m, "P"); fmt_u(m + slen(m), n + 1u); scat(m, " TRACK "); { char l[2] = {(char)('A' + t), 0}; scat(m, l); } scat(m, " PLAYS "); scat(m, f_lab[f_cur]); scat(m, " (THE SAME TAKE)"); say(m); }
         return;
@@ -755,7 +766,7 @@ static void files_view(void)
     for (uint32_t i = 0; i < NFK; i++) {
         int on = i == fk;
         vg_round(CX0 + (int)i * w, 41, w - 6, 26, 5, on ? (F_SAVE ? 0xFF3D6E : ACCENT) : CELL);
-        vg_text(FK_NAME[i], CX0 + (int)i * w + (w - 6) / 2, 46, VG_MED, on ? 0x0E0624 : DIM, VG_CENTER);
+        vg_text(FK_NAME[i], CX0 + (int)i * w + (w - 6) / 2, 46, VG_MED, on ? 0x000000 : DIM, VG_CENTER);
     }
     b[0] = 0;
     if (F_SAVE) {
