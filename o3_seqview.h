@@ -37,7 +37,8 @@ static void tracks_view(void)                   /* the four in view one under th
         int y = 72 + (int)i * 32, on = t == sel;
         uint32_t c = TRK_RGB[t], len = pat.trk[t].len, pos = len ? ui_seq_pos[t] % len : 0u, pw = seq_pw(t), pg = pos / pw;
         char b[24], n[PATCH_NAME + 1], l[2] = {(char)('A' + t), 0};
-        vg_round(CX0, y, CW - 14, 29, 4, on ? vg_mix(BG, c, 0.22f) : CELL);
+        vg_round(CX0, y, CW - 14, 29, 4, on ? vg_mix(BG, c, 0.38f) : CELL);
+        if (on) vg_frame(CX0, y, CW - 14, 29, 2, c);   /* (0.32, Sven: "deutlicher") the selected one framed in its colour */
         vg_round(CX0 + 4, y + 3, 23, 23, 3, c); vg_text(l, CX0 + 15, y + 6, VG_MED, 0x000000, VG_CENTER);
         if (au_is(t)) { au_row(t, y, on); state_text(t, 452, y + 6); continue; }   /* (3.7) an audio track */
         fmt_u(b, prog_num(trk_prog[t])); prog_name(trk_prog[t], n); scat(b, " "); scat(b, n);

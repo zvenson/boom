@@ -284,7 +284,7 @@ void vibe_on_init(float sr)
     au_boot();                                  /* (3.7) the audio tracks: their settings, their takes from the card */
     scope_state = 1;
     splash_unpack();
-    vibe_log("BOOM 0.31 (native VIBE, 8 tracks, DX7, STRINGS and E-PIANO kinds, drum grid, delay and reverb modes, tube amp insert, own outputs, DAW mode)");
+    vibe_log("BOOM 0.4 (native VIBE, 8 tracks, DX7, STRINGS and E-PIANO kinds, drum grid, delay and reverb modes, tube amp insert, own outputs, DAW mode)");
 }
 
 static void leave_seq_edit(void) { step_held = -1; audition_off(); entry_reset(); }

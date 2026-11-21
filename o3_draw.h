@@ -74,14 +74,15 @@ static void track_letters(int x, int y)         /* A-H (0.11: 11 px apart, eight
         char l[2] = {(char)('A' + t), 0};
         int mu = set.mix_mute >> t & 1u, on = t == sel, arm = (int)(au_armed() >> t & 1u);
         uint32_t c = mu ? RED : TRK_RGB[t];
-        if (!on && !mu) c = vg_mix(BG, c, 0.45f);
+        if (!on && !mu) c = vg_mix(BG, c, 0.32f);
+        if (on && !arm) vg_round(x + (int)t * 11 - 5, y - 2, 11, 21, 3, vg_mix(BG, TRK_RGB[t], 0.35f));   /* (0.32) the selected one on a tile */
         if (arm) {                              /* (0.29) ARMED: the letter white on red – bright while it records */
             vg_round(x + (int)t * 11 - 5, y - 2, 11, 21, 3, (ctl_au_rq >> t & 1u) && (ui_au_state == 2u || blink()) ? RED : 0x8A1030);
             c = 0xFFFFFF;
         }
         vg_text(l, x + (int)t * 11, y, VG_MED, c, VG_CENTER);
         if (mu) vg_rect(x + (int)t * 11 - 4, y + 9, 8, 2, RED);
-        if (on) vg_rect(x + (int)t * 11 - 4, y + 20, 8, 2, TRK_RGB[t]);
+        if (on) vg_rect(x + (int)t * 11 - 5, y + 20, 11, 3, TRK_RGB[t]);
     }
 }
 static void out_meters(int x, int y, int h)     /* the output, left and right (after MASTER): two thin bars */
