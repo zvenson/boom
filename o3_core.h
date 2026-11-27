@@ -37,7 +37,9 @@ static struct {                                 /* = OberVave 2.0's settings, fi
     uint8_t au_autosave, as_ok;                 /* (0.31, Sven: "nix auto save") 0: a take stays in memory until SAVE ▸ AUDIO names it (as an MPC); 1: every take written at once; ok: AS_OK */                 /* (0.31, Sven: "keine Aussteuerung, kein Threshold") a SAMPLER's threshold: 0 OFF, 1..54 = -54..-1 dBFS; ok: THR_OK */   /* (0.31, Sven: "im Mixer auch einen EQ") per track: LOW / MID / HIGH 64 = 0 dB (+-15),
                                                  * MID's FREQ 0..127 = 200 Hz .. 5 kHz, LOW CUT 0 OFF · 1 40 · 2 80 · 3 150 Hz; ok: EQ_OK */                 /* (0.24, Sven) MIDI IN per track: 0 = SELECTED (plays while chosen), 1..16 = always that channel; ok: MCH_OK */
    /* (0.21) a SAMPLER's cuts moved by hand: each as 1/65536 of its take; smc_n 0 = the automatic ones; ok: SMC_OK */                  /* BOOM: MASTER FX (mixer row 2) – FILTER 0..128 (64 off), CRUSH, ECHO 0..127, REPEAT (never saved on); ok: MFX_OK */
+    uint8_t tbank[NTRK], tb_ok;                 /* (0.41) each track's program bank (tprog: its slot there); ok: TB_OK – before, tprog was one number of 217 */
 } set;
+#define TB_OK 0x3Bu
 #define MFX_OK 0x4Fu
 #define SMC_OK 0x5Cu
 #define MCH_OK 0x3Du
@@ -54,12 +56,14 @@ static uint8_t midi_last_ch;                    /* (0.24) the channel the last M
 #define DV_OK 0x5Du
 enum { CLICK_OFF, CLICK_REC, CLICK_ON, CLICK_COUNT, NCLICK };
 enum { RQ_OFF, RQ_32, RQ_16, RQ_8, RQ_4, NRQ };
-static const uint8_t TPROG_DEF[NTRK] = {0, PROG_BASS0, PROG_MEL0, PROG_SYNTH0 + 42u, 1u, PROG_SYNTH0 + 33u, PROG_STR0, PROG_DX0};   /* (0.11: G SOLINA, H the first DX voice) */   /* TRAP KIT, CLEAN 808, DARK BELL, WARM PAD, DARK KIT, MINOR FALL */
+static const uint16_t TPROG_DEF[NTRK] = {BK_DRUMS * NSLOT, BK_BASS * NSLOT, BK_DX * NSLOT, BK_SYNTH * NSLOT + 42u, BK_DRUMS * NSLOT + 1u, BK_SYNTH * NSLOT + 33u, BK_STR * NSLOT, BK_DX * NSLOT + NMELDX};   /* (0.41: bank * 128 + slot – C: MEL's DARK BELL as a DX voice) */   /* (0.11: G SOLINA, H the first DX voice) */   /* TRAP KIT, CLEAN 808, DARK BELL, WARM PAD, DARK KIT, MINOR FALL */
 static const uint32_t TRK_RGB[NTRK] = {0x00E5FF, 0xFF8A1E, 0x2BFFB4, 0xFF2E97, 0xC77DFF, 0xFFE14D, 0x5C8DFF, 0xFF5A5A};   /* (BOOM: neon) */
 
-/* the user's programs: 2 x 50 (2.0's program sectors), all in RAM */
-#define NPSECT 4u
-#define PS_N 50u
+/* the user's programs: (0.41) a sector of 128 per bank ("pbank0" ..), all in RAM – before: 50 a sector in one row ("plob0" ..) */
+#define NPSECT NBANK
+#define PS_N NSLOT
+#define PS_N_OLD 50u
+#define NPSECT_OLD 5u
 #define PS_TAG (0x50420000u | PATCH_BYTES)      /* (BOOM) "BP" + the patch's size: programs saved with another layout are passed over */
 typedef struct { uint32_t tag; uint8_t used[PS_N], pad[2]; patch_t p[PS_N]; } psect_t;
 static psect_t psect[NPSECT];
@@ -91,7 +95,7 @@ static void settings_defaults(void)
     memset(&set, 0, sizeof set);
     set.version = SET_VERSION; set.tempo = 120; set.click = CLICK_REC;
     for (t = 0; t < NTRK; t++) {
-        set.tprog[t] = TPROG_DEF[t]; set.mix_lvl[t] = 100; set.rec_qt[t] = RQ_16;
+        set.tprog[t] = (uint8_t)(TPROG_DEF[t] % NSLOT); set.tbank[t] = (uint8_t)(TPROG_DEF[t] / NSLOT); set.mix_lvl[t] = 100; set.rec_qt[t] = RQ_16;
     }
     for (t = 0; t < NFXP; t++) set.fx[t] = (uint8_t)PDEF[P_CHO_RATE + t].def;   /* the effects full, the sends closed */
     set.fx[P_CHO_MIX - P_CHO_RATE] = 127;       /* (0.7: the delay's and the reverb's returns are always full; their MODEs: the table's defaults) */
@@ -108,22 +112,57 @@ static void settings_defaults(void)
     eq_defaults();
     memset(set.smp_thr, 0, sizeof set.smp_thr); set.thr_ok = THR_OK;
     set.au_autosave = 0; set.as_ok = AS_OK;
+    set.tb_ok = TB_OK; set.prog = set.tprog[0];
 }
 
-static void prog_get(uint32_t n, patch_t *p)    /* program n: the user's, else the factory's (1-16 kits, 17-32 basses, 33-99 MEL) */
+#include "bm_mel2dx.h"   /* (0.41) */
+static void mel_as_dx(const factory_t *f, patch_t *p)   /* (0.41) a MEL-style sound (4-op) as a DX voice */
+{
+    patch_from_factory(p, f, T_MEL);
+    mel_to_dx(p->v, p->dx, f->name);
+    p->v[P_TYPE] = T_DX; p->v[P_DX_BRIGHT] = p->v[P_DX_ATTACK] = p->v[P_DX_DECAY] = p->v[P_DX_RELEASE] = 64; p->v[P_DX_ALGO] = p->v[P_DX_FB] = 0;
+}
+static void prog_factory(uint32_t n, patch_t *p)   /* program n as it comes: its bank's factory sound, or that bank's INIT */
+{
+    uint32_t b = (n / NSLOT) % NBANK, s = n % NSLOT, ty = BANK_TYPE[b], i;
+    const factory_t *f;
+    if (b == BK_DX && s < NMELDX) {             /* (0.41) MEL's sound, played by DX: its voice made from its operators */
+        mel_as_dx(&FACT_MEL[s], p);
+        { static const uint8_t UP[NMELDX] = {149, 177, 142, 173, 125, 176, 133, 139, 122, 166, 168, 167, 120, 162, 150, 118};   /* (measured: MEL / DX, %) */
+          uint32_t v = (uint32_t)p->v[P_VOLUME] * UP[s] / 100u; p->v[P_VOLUME] = (uint8_t)(v > 127u ? 127u : v); }   /* (a DX voice is quieter: up to 127) */
+        { static const uint8_t GN[NMELDX] = {16,40,11,36,0,39,4,9,0,30,31,31,0,26,30,0};   /* (measured against 0.40's MEL: the rest of the way, x 1 + g * 3/127) */
+          p->v[P_DX_GAIN] = GN[s]; }
+        return;
+    }
+    if (b == BK_DX && s < NMELDX + DX_NSYNTH) {   /* (0.6) DX: sloopDX's factory voices, their names */
+        static const char *const DN[DX_NSYNTH] = {DX_SYNTH_NAME_LIST};
+        const char *nm = DN[s - NMELDX];
+        patch_from_factory(p, &FACT_DX_INIT, T_DX); p->v[P_TYPE] = T_DX;
+        memcpy(p->dx, DX_SYNTH[s - NMELDX], DX_VOICE);
+        for (i = 0; i < PATCH_NAME; i++) p->v[NPARAM + i] = ' ';
+        for (i = 0; i < PATCH_NAME && nm[i]; i++) p->v[NPARAM + i] = (uint8_t)nm[i];
+        return;
+    }
+    f = bank_factory(b, b == BK_DX ? s - NMELDX - DX_NSYNTH : s);
+    if (f && b == BK_DX) { mel_as_dx(f, p); return; }   /* (0.41) DX's own: written MEL-style, made DX voices */
+    if (f) { patch_from_factory(p, f, ty); if (!(b == BK_EP && p->v[P_TYPE] == T_EP)) p->v[P_TYPE] = (uint8_t)ty; return; }
+    patch_from_factory(p, BANK_INIT[b], ty); p->v[P_TYPE] = (uint8_t)ty;   /* an INIT slot: the kind's plain sound, "WT INIT 9" */
+    {
+        char nm[16]; uint32_t k = 0, num = s + 1u;
+        for (const char *q = BANK_AB[b]; *q; q++) nm[k++] = *q;
+        for (const char *q = " INIT"; *q; q++) nm[k++] = *q;
+        if (num < 100u) nm[k++] = ' ';
+        if (num >= 100u) nm[k++] = (char)('0' + num / 100u);
+        if (num >= 10u) nm[k++] = (char)('0' + num / 10u % 10u);
+        nm[k++] = (char)('0' + num % 10u);
+        for (i = 0; i < PATCH_NAME; i++) p->v[NPARAM + i] = (uint8_t)(i < k ? nm[i] : ' ');
+    }
+}
+static void prog_get(uint32_t n, patch_t *p)    /* program n: the user's, else the factory's */
 {
     n %= NPROG;
-    if (psect[n / PS_N].tag == PS_TAG && psect[n / PS_N].used[n % PS_N]) *p = psect[n / PS_N].p[n % PS_N];
-    else {
-        patch_from_factory(p, factory_of(n), prog_type_dflt(n)); p->v[P_TYPE] = (uint8_t)prog_type_dflt(n);   /* (a factory slot: its range's kind) */
-        if (n >= PROG_DX0 && n - PROG_DX0 < DX_NSYNTH) {   /* (0.6) DX: sloopDX's factory voices, their names */
-            static const char *const DN[DX_NSYNTH] = {DX_SYNTH_NAME_LIST};
-            uint32_t i; const char *nm = DN[n - PROG_DX0];
-            memcpy(p->dx, DX_SYNTH[n - PROG_DX0], DX_VOICE);
-            for (i = 0; i < PATCH_NAME; i++) p->v[NPARAM + i] = ' ';
-            for (i = 0; i < PATCH_NAME && nm[i]; i++) p->v[NPARAM + i] = (uint8_t)nm[i];
-        }
-    }
+    if (psect[n / NSLOT].tag == PS_TAG && psect[n / NSLOT].used[n % NSLOT]) *p = psect[n / NSLOT].p[n % NSLOT];
+    else prog_factory(n, p);
 }
 static void prog_name(uint32_t n, char *out)    /* its 10-character name, trailing spaces cut */
 {
@@ -133,25 +172,20 @@ static void prog_name(uint32_t n, char *out)    /* its 10-character name, traili
     out[PATCH_NAME] = 0;
     for (i = (int)PATCH_NAME - 1; i >= 0 && out[i] == ' '; i--) out[i] = 0;
 }
-static uint8_t pk_kind[NPROG]; static int pk_valid;   /* (0.31) each slot's kind, remembered – 200 slots read anew only after a save or a load */
-static void pk_fill(void) { patch_t p; for (uint32_t m = 0; m < NPROG; m++) { prog_get(m, &p); pk_kind[m] = (uint8_t)(p.v[P_TYPE] % NTYPE); } pk_valid = 1; }
-static uint32_t prog_type(uint32_t n) { if (!pk_valid) pk_fill(); return pk_kind[n % NPROG]; }   /* the kind of sound in slot n */
-/* (0.31, Sven 20.11.: "Presets durcheinander – Bass startet nicht bei 1, E-Piano bei 193") the number a sound SHOWS: its place
- * among the slots of its kind (BASS 1-16, E-PIANO 1-8), not the slot in the store of all kinds. MIDI program changes keep the slot. */
-static uint32_t prog_num(uint32_t n)
-{
-    uint32_t ty = prog_type(n), c = 1;
-    n %= NPROG;
-    for (uint32_t m = 0; m < n; m++) if (pk_kind[m] == ty) c++;
-    return c;
-}
+static uint32_t prog_type(uint32_t n) { return prog_type_dflt(n); }   /* the kind of the slots of n's bank */
+static uint32_t prog_num(uint32_t n) { return n % NSLOT + 1u; }   /* the number a sound shows: its slot in its kind, 1-128 */
 static uint32_t trk_type(uint32_t t) { return live_p[t % NTRK].v[P_TYPE] % NTYPE; }   /* the kind of sound track t plays */
 static int midi_trk_any(void) { for (uint32_t t = 0; t < NTRK; t++) if (trk_type(t) == T_MIDI) return 1; return 0; }   /* (0.30) a MIDI track: the clock and START / STOP go out */
-static uint32_t prog_step_type(uint32_t from, int dir, uint32_t ty)   /* the next slot of that kind, round the 99 (none: stays) */
+static uint32_t prog_step_type(uint32_t from, int dir, uint32_t ty)   /* (0.41) the next slot of that kind's bank: 1..128, it stops at the ends */
 {
-    uint32_t n = from % NPROG;
-    for (uint32_t i = 0; i < NPROG; i++) { n = (uint32_t)(((int32_t)n + dir + (int32_t)NPROG) % (int32_t)NPROG); if (prog_type(n) == ty) return n; }
-    return from % NPROG;
+    uint32_t b = bank_of(ty);
+    int32_t s = from / NSLOT == b ? (int32_t)(from % NSLOT) + dir : 0;
+    return b * NSLOT + (uint32_t)clampi(s, 0, (int32_t)NSLOT - 1);
+}
+static void set_tprog(uint32_t t, uint32_t n)   /* (0.41) the settings keep a track's program as its bank and slot */
+{
+    set.tprog[t % NTRK] = (uint8_t)(n % NSLOT); set.tbank[t % NTRK] = (uint8_t)(n / NSLOT); set.tb_ok = TB_OK;
+    if (!(t % NTRK)) set.prog = (uint8_t)(n % NSLOT);
 }
 
 /* the effects are global (as a DAW's return tracks): they live in track A's patch and in set.fx */
@@ -164,9 +198,9 @@ static void trk_load(uint32_t t, uint32_t n)    /* track t: program n */
     if (!t) fx_keep(&p);
     live_p[t] = p;
     trk_prog[t] = n; trk_edited[t] = 0;
-    set.tprog[t] = (uint8_t)n;
-    if (!t) set.prog = (uint8_t)n;
+    set_tprog(t, n);
 }
+static int32_t type_pos(uint32_t ty) { for (uint32_t i = 0; i < NTYPE_ORDER; i++) if (TYPE_ORDER[i] == ty) return (int32_t)i; return -1; }   /* (0.41) its place in TYPE's order, -1: not offered (MEL) */
 static void trk_set_type(uint32_t t, uint32_t ty)   /* TYPE: the track plays that kind of sound – its first slot (the engine ends the old voices) */
 {
     t %= NTRK; ty %= NTYPE;

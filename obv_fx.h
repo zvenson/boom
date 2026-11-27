@@ -115,11 +115,11 @@ static void fx_block(const patch_t *p, uint32_t quarter)
     d = p->v[P_REV_DAMP]; rev_damp_k = 32768 - d * d * 2;   /* the one-pole's k at the half rate */
     {   /* (0.7) HALL: a long, darker, slowly swaying tail behind a later start · ROOM: a small tank, short and bright ·
          * PLATE: the tank as it was (dense, bright) */
-        static const uint16_t SC[NRM] = {256, 110, 256};
+        static const uint16_t SC[NRM] = {256, 150, 256};   /* (Sven 21.11.: ROOM "wie ne Blechbüchse" – at 110 the short tank rang) */
         rv_len[0] = (int32_t)(RV_D1 * SC[rev_mode] >> 8); rv_len[1] = (int32_t)(RV_D2 * SC[rev_mode] >> 8);
         rv_len[2] = (int32_t)(RV_D3 * SC[rev_mode] >> 8); rv_len[3] = (int32_t)(RV_D4 * SC[rev_mode] >> 8);
         if (rev_mode == RM_HALL) { rev_decay = 20000 + ((p->v[P_REV_SIZE] * p->v[P_REV_SIZE] * 12000) >> 14); rev_damp_k = rev_damp_k * 3 / 4; rv_bw = RV_BW * 5 / 8; rv_mod = 512; }
-        else if (rev_mode == RM_ROOM) { rev_decay = 6000 + ((p->v[P_REV_SIZE] * p->v[P_REV_SIZE] * 17000) >> 14); rv_bw = RV_BW * 3 / 2 > 32000 ? 32000 : RV_BW * 3 / 2; rv_mod = 128; }
+        else if (rev_mode == RM_ROOM) { rev_decay = 6000 + ((p->v[P_REV_SIZE] * p->v[P_REV_SIZE] * 17000) >> 14); rev_damp_k = rev_damp_k * 13 / 16; rv_bw = RV_BW; rv_mod = 512; }   /* (a small room: swaying as much as the hall (512 = the lines' +16 spare), so no line rings; walls that take the top) */
         else { rv_bw = RV_BW; rv_mod = 256; }
         if (rev_damp_k < 2000) rev_damp_k = 2000;
     }
@@ -186,10 +186,11 @@ static inline void rev_tick(int32_t in)
     b = ap_step(&rv_ap4, (rv_lpr * dec) >> 15, 16384);
     line_write(&rv_d4, b);
     /* the output taps (the paper's), x 0.6 */
-    a = line_read(&rv_d3, RVL(266)) + line_read(&rv_d3, RVL(2974)) - line_read(&rv_ap4, RVL(1913)) + line_read(&rv_d4, RVL(1996))
-      - line_read(&rv_d1, RVL(1990)) - line_read(&rv_ap2, RVL(187)) - line_read(&rv_d2, RVL(1066));
-    b = line_read(&rv_d1, RVL(353)) + line_read(&rv_d1, RVL(3627)) - line_read(&rv_ap2, RVL(1228)) + line_read(&rv_d2, RVL(2673))
-      - line_read(&rv_d3, RVL(2111)) - line_read(&rv_ap4, RVL(335)) - line_read(&rv_d4, RVL(121));
+#define RVT(x) (rev_mode == RM_ROOM && (x) > 400 ? RVL(x) * 150u >> 8 : RVL(x))   /* (ROOM: the taps inside its shorter tank) */
+    a = line_read(&rv_d3, RVT(266)) + line_read(&rv_d3, RVT(2974)) - line_read(&rv_ap4, RVT(1913)) + line_read(&rv_d4, RVT(1996))
+      - line_read(&rv_d1, RVT(1990)) - line_read(&rv_ap2, RVT(187)) - line_read(&rv_d2, RVT(1066));
+    b = line_read(&rv_d1, RVT(353)) + line_read(&rv_d1, RVT(3627)) - line_read(&rv_ap2, RVT(1228)) + line_read(&rv_d2, RVT(2673))
+      - line_read(&rv_d3, RVT(2111)) - line_read(&rv_ap4, RVT(335)) - line_read(&rv_d4, RVT(121));
     rv_yl = (a * 19661) >> 15;
     rv_yr = (b * 19661) >> 15;
 }

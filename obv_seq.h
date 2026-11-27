@@ -30,7 +30,14 @@ typedef struct { uint16_t len; uint8_t div, swing; int8_t transp; uint8_t mute, 
 #define AUTO_NONE 0xFFu
 #define AUTO_MAGIC 0x4F545541u                  /* "AUTO" */
 typedef struct { uint8_t param, pad[3]; uint8_t v[SEQ_STEPS]; } lane_t;
-typedef struct { uint32_t magic; seqtrk_t trk[NTRK]; step_t st[NTRK][SEQ_STEPS]; uint32_t auto_magic; lane_t lane[NTRK][NLANE]; } pattern_t;
+/* (22.11.2026, Sven: "recorde es so wie andere DAWs das auch machen") the SUSTAIN PEDAL (CC 64) recorded as its own events,
+ * as a DAW keeps them beside the notes: per track and step up to two changes, each PED_DOWN (pressed) or not (let go) plus
+ * its place in the step (0..127, as a note's nudge); PED_NONE: none. Played back it holds the track's notes as the pedal
+ * did; a MIDI track sends CC 64. In order in a step (an up before a down on the same place: the change of a chord). */
+#define PED_NONE 0xFFu
+#define PED_DOWN 0x80u
+#define PED_MAGIC 0x4C444550u                   /* "PEDL" */
+typedef struct { uint32_t magic; seqtrk_t trk[NTRK]; step_t st[NTRK][SEQ_STEPS]; uint32_t auto_magic; lane_t lane[NTRK][NLANE]; uint32_t ped_magic; uint8_t ped[NTRK][SEQ_STEPS][2]; } pattern_t;
 
 static pattern_t pat;                           /* the pattern now: the main loop edits, the ISR plays */
 /* (12.11.2026, Sven: "man kann nur 4/4 Takt?") the meter, per track: trk.pad[0] (0 = 4/4, as every pattern before it).
@@ -87,11 +94,13 @@ static void auto_init(pattern_t *p)
     p->auto_magic = AUTO_MAGIC;
     for (t = 0; t < NTRK; t++) for (l = 0; l < NLANE; l++) lane_clear(&p->lane[t][l]);
 }
+static void ped_clear_trk(pattern_t *p, uint32_t t) { memset(p->ped[t % NTRK], PED_NONE, sizeof p->ped[0]); }
 static void pat_init(pattern_t *p)
 {
     uint32_t i, t;
     p->magic = PAT_MAGIC;
     auto_init(p);
+    p->ped_magic = PED_MAGIC; memset(p->ped, PED_NONE, sizeof p->ped);
     for (t = 0; t < NTRK; t++) {
         for (i = 0; i < SEQ_STEPS; i++) step_clear(&p->st[t][i]);
         p->trk[t].len = 16;                     /* a bar of sixteenths each */
@@ -111,7 +120,7 @@ static void pat_factory(uint32_t n, pattern_t *p)   /* a pattern never saved: em
 
 /* ---- the player (ISR, per CTL block) */
 #define NO_WAIT 0xFFFFFFFFu
-typedef struct { uint32_t cnt, dur, step, sub, rat_n, rat_i, gate_at, nsnd, play, tie, wait, on_at, hold_end, frac; uint8_t snd[SEQ_CHORD], roll_i[SEQ_CHORD]; } seqrun_t;   /* hold_end: a late note's end in the next step */
+typedef struct { uint32_t cnt, dur, step, sub, rat_n, rat_i, gate_at, nsnd, play, tie, wait, on_at, hold_end, frac, ped_i; uint8_t snd[SEQ_CHORD], roll_i[SEQ_CHORD]; } seqrun_t;   /* ped_i: the step's pedal changes done */   /* hold_end: a late note's end in the next step */
 static seqrun_t sr[NTRK];
 static uint32_t seq_was, seq_beat_cnt, seq_beat_n, count_left;
 
@@ -187,6 +196,13 @@ static void seq_from_top(uint32_t t)            /* track t: step 1 in this block
     r->play = r->tie = 0;
     r->wait = NO_WAIT;
     r->hold_end = 0;
+    r->ped_i = 2;
+    {   /* (the pedal at the top: as the loop's last change left it – a pedal held round the loop's end holds on) */
+        uint32_t len = pat.trk[t].len > SEQ_STEPS ? SEQ_STEPS : pat.trk[t].len, dn = 0;
+        for (int32_t i = (int32_t)len - 1; i >= 0 && !dn; i--)
+            for (int j = 1; j >= 0; j--) if (pat.ped[t][i][j] != PED_NONE) { dn = 1u + (pat.ped[t][i][j] >= PED_DOWN); break; }
+        seq_ped_set(t, dn == 2u);
+    }
 }
 
 static void seq_take_requests(void)             /* the start / stop requests (on a downbeat, or at once when stopped) */
@@ -352,7 +368,7 @@ static void seq_tick(void)
 {
     uint32_t t, q;
     if (!ctl_seq_run) {
-        if (seq_was) { for (t = 0; t < NTRK; t++) seq_release_t(t); seq_was = 0; }
+        if (seq_was) { for (t = 0; t < NTRK; t++) seq_release_t(t); seq_was = 0; seq_ped = 0; }
         au_song = -1;
         seq_take_requests();                    /* (stopped: a pad switches its track at once) */
         return;
@@ -404,7 +420,7 @@ static void seq_tick(void)
         if (k->tm && !tmw && !(ctl_tm_grow >> t & 1u)) len = 0;   /* (0.32 TIME, no loop yet: silent until REC) */
         if (tmw && (k->te & (TM_FINE - 1u)) && r->step == k->te / TM_FINE && r->dur) ecut = (r->dur * (k->te & (TM_FINE - 1u))) >> 7;
         early = ecut && r->cnt >= ecut;         /* (TIME: the loop ends inside this step) */
-        if (!len || !(ctl_trk_on >> t & 1u) || (ctl_au_type >> t & 1u) || (ctl_trk_daw >> t & 1u)) { seq_release_t(t);   /* (BOOM 0.4: the DAW plays it) */ r->tie = 0; r->wait = NO_WAIT; r->hold_end = 0; continue; }
+        if (!len || !(ctl_trk_on >> t & 1u) || (ctl_au_type >> t & 1u) || (ctl_trk_daw >> t & 1u)) { seq_release_t(t);   /* (BOOM 0.4: the DAW plays it) */ seq_ped_set(t, 0); r->tie = 0; r->wait = NO_WAIT; r->hold_end = 0; continue; }
         if (r->cnt >= r->dur || early) {        /* the next step */
             uint32_t dv = DIV_PER_QUARTER[k->div % NDIV], base = q / dv, sw, carry = 0;
             r->frac += q % dv;                  /* (the rest of q spread over the steps: div steps are exactly a quarter) */
@@ -425,6 +441,7 @@ static void seq_tick(void)
             if (r->dur < CTL) r->dur = CTL;
             s = seq_step(t, r->step);
             seq_auto(t, r->step);
+            r->ped_i = 0;
             TRACE('T', t, r->step * 1000000u + (s->note[0] ? (uint32_t)s->note[0] * 1000u : 0u) + (s->note[1] ? 900u : 0u) + (s->gate >= GATE_TIE ? 1u : 0u));
             r->play = s->note[0] && !(s->ratch & STEP_OFF) && (s->chance >= 100u || xorshift(&rnd_state) % 100u < s->chance);
             if (wrap && (k->ts & (TM_FINE - 1u))) {   /* (TIME: START inside the step – what lies before it is not played) */
@@ -474,6 +491,12 @@ static void seq_tick(void)
                     if (seq_live(t, m) || ctl_rec_mute >> t & 1u) continue;
                     voice_trigger(t, m, s->nv[q] ? s->nv[q] : s->vel ? s->vel : 100u);
                 }
+        }
+        while (r->ped_i < 2u && r->step < SEQ_STEPS) {   /* (22.11.) the pedal's changes in this step, when it is time */
+            uint32_t e = pat.ped[t][r->step][r->ped_i];
+            if (e == PED_NONE) { r->ped_i = 2; break; }
+            if (r->cnt < ((r->dur * (e & 127u)) >> 7)) break;
+            seq_ped_set(t, e >= PED_DOWN); r->ped_i++;
         }
         if (r->hold_end && r->cnt >= r->hold_end) { r->hold_end = 0; seq_release_t(t); }   /* a late note from the step before: its end */
         if (r->nsnd && !r->hold_end && r->wait == NO_WAIT && r->gate_at != 0xFFFFFFFFu && r->cnt >= r->on_at && r->cnt - r->on_at - r->rat_i * r->sub >= r->gate_at)

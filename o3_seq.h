@@ -26,7 +26,8 @@ static int seq_shift;                           /* SHIFT held: STEPS shows STEP+
 static struct { uint16_t step; uint32_t t; } rec_open[128];
 static uint32_t rec_on_t[NTRK][SEQ_STEPS];      /* a note's start written into the step in this recording (o3_ms + 1) */
 static void undo_save(void);
-static void rec_begin(void) { rec = REC_ON; undo_save(); memset(rec_on_t, 0, sizeof rec_on_t); }
+static uint32_t ped_new;                        /* (22.11.) bit t: this take has not touched track t's pedal yet – its first change replaces the old */
+static void rec_begin(void) { rec = REC_ON; undo_save(); memset(rec_on_t, 0, sizeof rec_on_t); ped_new = (1u << NTRK) - 1u; }
 static pattern_t pats[NPAT];                    /* every pattern in memory */
 /* (3.8, Sven: "Zurück als UNDO, Enc 1 for steps") UNDO with NUNDO steps back and as many forward (REDO): undo_st holds
  * the pattern before each edit, redo_st what an UNDO took back. RETURN held + ENCODER 1: back / forward a step each
@@ -65,6 +66,23 @@ static uint32_t beat_mark(uint32_t t, uint32_t i)   /* 2: a bar begins at step i
 }
 static uint32_t seq_pages(uint32_t t) { uint32_t w = seq_pw(t); return pat.trk[t].len ? (pat.trk[t].len + w - 1u) / w : 1u; }
 static void seq_cursor_set(uint32_t t, uint32_t n) { seq_cur[t] = n; seq_pg[t] = n / seq_pw(t); }
+/* (0.41, Sven 27.11.: "ein Strich mitlaufen … und einen 2. Edit-Strich – wird der bewegt, bleibt die Animation stehen")
+ * playing, STEPS' page follows the playhead; the edit line (the cursor) moved by hand holds the page where it is (the
+ * track's bit in seq_hold) – until the next start */
+static uint32_t seq_hold, seq_was_run;
+static void seq_edit_moved(uint32_t t) { seq_hold |= 1u << (t % NTRK); }
+static void seq_follow(void)
+{
+    if (ctl_seq_run && !seq_was_run) seq_hold = 0;   /* (a start: every track follows again) */
+    seq_was_run = ctl_seq_run;
+    if (!ctl_seq_run) return;
+    for (uint32_t t = 0; t < NTRK; t++) {
+        uint32_t len = pat.trk[t].len, pw = seq_pw(t);
+        if (seq_hold >> t & 1u || !(ctl_trk_on >> t & 1u) || !len || pat.trk[t].tm || !pw) continue;
+        if (t == sel && step_held >= 0) continue;   /* (a pad held: the page stays under the finger) */
+        seq_pg[t] = (ui_seq_pos[t] % len) / pw;
+    }
+}
 static void undo_push(pattern_t *st, uint32_t *n, const pattern_t *p)   /* (full: the oldest goes) */
 {
     if (*n >= NUNDO) { memmove(st, st + 1, (NUNDO - 1u) * sizeof(pattern_t)); *n = NUNDO - 1u; }
@@ -422,13 +440,13 @@ static void step_pad_down(uint32_t pad, uint32_t vel)   /* vel: how hard the pad
     }
     if (drum_grid()) {                          /* the grid: this drum on this step – set at once when it is not there */
         step_t *st = seq_step(t, n);
-        step_held = (int32_t)n; step_turned = step_midi = 0; seq_cur[t] = n;
+        step_held = (int32_t)n; step_turned = step_midi = 0; seq_cur[t] = n; seq_edit_moved(t);
         if (drum_slot(st, drum_row[t]) < 0 || (st->ratch & STEP_OFF)) { undo_save(); drum_set(st, drum_row[t], vel); step_turned = 1; edited(); }
         if (!ctl_seq_run) drum_hear(t, drum_row[t], vel);
         return;
     }
     step_held = (int32_t)n; step_turned = step_midi = 0;
-    seq_cur[t] = n;
+    seq_cur[t] = n; seq_edit_moved(t);
     roll_show(t);
     {                                           /* (0.14) the piano roll: the row's pitch on this step – set at once when it is not there */
         step_t *st = seq_step(t, n);
@@ -475,6 +493,7 @@ static void step_cursor_turn(int32_t s)         /* (0.32) DATA in STEPS: the cur
 {
     uint32_t t = sel, len = pat.trk[t].len;
     if (!len) return;
+    seq_edit_moved(t);
     seq_cursor_set(t, (uint32_t)clampi((int32_t)(seq_cur[t] % len) + s, 0, (int32_t)len - 1));
 }
 static void step_pad_up(uint32_t pad)
@@ -519,6 +538,46 @@ static void entry_note(uint32_t on, uint32_t note, uint32_t vel)
     roll_pick(t, k);                            /* (the roll's row follows the key) */
     entry_on_note[note] = 1; entry_n++;
     edited();
+}
+
+/* ---- (22.11.2026, Sven: "recorde es so wie andere DAWs das auch machen") the SUSTAIN PEDAL: played on the track its
+ * notes go to, recorded as its own events beside the notes (obv_seq.h: pat.ped) – where it was pressed and let go, as
+ * finely as a note's nudge, never quantised. A take's first pedal change on a track replaces the pedal recorded there
+ * before (a new take, not two pedals on top of each other); a pedal held as the take begins is pressed at its start. */
+#define PKEY(x) ((((uint32_t)(x)) & 127u) * 2u + ((x) >= PED_DOWN))   /* (in a step: by place, an up before a down) */
+static void ped_put(uint32_t t, uint32_t s0, uint32_t pos, uint32_t on)
+{
+    uint8_t *e = pat.ped[t % NTRK][s0 % SEQ_STEPS], ev = (uint8_t)((on ? PED_DOWN : 0u) | (pos & 127u));
+    if (e[0] == PED_NONE) e[0] = ev;
+    else if (e[1] == PED_NONE) { if (PKEY(ev) < PKEY(e[0])) { e[1] = e[0]; e[0] = ev; } else e[1] = ev; }
+    else if (PKEY(ev) < PKEY(e[0])) e[0] = ev;   /* (a third change in one step: the nearer one goes) */
+    else e[1] = ev;
+}
+static void rec_ped(uint32_t on)
+{
+    uint32_t t = sel % NTRK, s0, nudge = 0;
+    if (au_is(t) || rec != REC_ON || !ctl_seq_run || ctl_count || rec_wait || !pat.trk[t].len) return;
+    if (!(ctl_trk_on >> t & 1u)) return;         /* (a pedal starts no track: it is recorded once the track runs) */
+    s0 = ctl_seq_restart ? 0u : rec_where(t, &nudge);
+    if (ped_new >> t & 1u) { ped_new &= ~(1u << t); ped_clear_trk(&pat, t); }
+    ped_put(t, s0, nudge, on);
+    edited();
+}
+static void ped_rec_poll(void)                  /* (main loop) the take has begun with the pedal held: pressed at its start */
+{
+    uint32_t t = sel % NTRK;
+    if ((ped_new >> t & 1u) && (ctl_sus_live >> t & 1u) && rec == REC_ON && ctl_seq_run && !ctl_count && !rec_wait) rec_ped(1);
+}
+static uint32_t ped_keys_t = NTRK;              /* the track the keys' (or the jack's) pedal went down on: its up goes there too */
+static void ped_live(uint32_t t, uint32_t on, uint32_t keys)
+{
+    t %= NTRK;
+    if (keys) {
+        if (on) { if (ped_keys_t < NTRK && ped_keys_t != t) __atomic_fetch_and(&ctl_sus_live, ~(1u << ped_keys_t), __ATOMIC_ACQ_REL); ped_keys_t = t; }
+        else if (ped_keys_t < NTRK) { t = ped_keys_t; ped_keys_t = NTRK; }
+    }
+    if (on) __atomic_fetch_or(&ctl_sus_live, 1u << t, __ATOMIC_ACQ_REL); else __atomic_fetch_and(&ctl_sus_live, ~(1u << t), __ATOMIC_ACQ_REL);
+    if (t == sel % NTRK) rec_ped(on);
 }
 
 /* a note from the keys, the pads or MIDI on the selected track: it sounds, REC takes it, the sequencer's views use it */
@@ -566,7 +625,7 @@ typedef struct {
     uint8_t mfx[NMFX], mfx_ok;                  /* (BOOM) MASTER FX: FILTER, CRUSH, ECHO (REPEAT stays OFF); ok: MFX_OK */
     uint8_t eq[NTRK][5];                        /* (0.31, Sven: the EQ is the mixer's – it goes with the pattern) LOW MID FREQ HIGH CUT */
 } mixset_t;
-typedef struct { uint32_t magic; uint8_t prog[NTRK], edited[NTRK]; patch_t p[NTRK]; mixset_t mx; } psnd_t;
+typedef struct { uint32_t magic; uint16_t prog[NTRK]; uint8_t edited[NTRK]; patch_t p[NTRK]; mixset_t mx; } psnd_t;   /* (0.41: prog = bank * 128 + slot) */
 static psnd_t psnd[NPAT];
 static uint64_t snd_dirty;                      /* bit n: psnd[n] to save */
 static int bytes_same(const void *a, const void *b, uint32_t n) { const uint8_t *x = a, *y = b; while (n--) if (*x++ != *y++) return 0; return 1; }
@@ -627,7 +686,7 @@ static void snd_capture(uint32_t n)             /* what plays now into pattern n
 {
     psnd_t *s = &psnd[n % NPAT];
     s->magic = PSN2_MAGIC;
-    for (uint32_t t = 0; t < NTRK; t++) { s->p[t] = live_p[t]; s->prog[t] = (uint8_t)trk_prog[t]; s->edited[t] = (uint8_t)trk_edited[t]; }
+    for (uint32_t t = 0; t < NTRK; t++) { s->p[t] = live_p[t]; s->prog[t] = (uint16_t)trk_prog[t]; s->edited[t] = (uint8_t)trk_edited[t]; }
     mx_from_set(&s->mx);
     snd_dirty |= 1ull << (n % NPAT); store_t = o3_ms;
 }
@@ -641,8 +700,7 @@ static void snd_meta(uint32_t n)                /* pattern n's program numbers a
 {
     const psnd_t *s = &psnd[n % NPAT];
     if (s->magic != PSN2_MAGIC) { snd_capture(n); return; }
-    for (uint32_t t = 0; t < NTRK; t++) { trk_prog[t] = s->prog[t] % NPROG; trk_edited[t] = s->edited[t]; set.tprog[t] = (uint8_t)trk_prog[t]; }
-    set.prog = set.tprog[0];
+    for (uint32_t t = 0; t < NTRK; t++) { trk_prog[t] = s->prog[t] % NPROG; trk_edited[t] = s->edited[t]; set_tprog(t, trk_prog[t]); }
     mx_to_set(&s->mx);
 }
 
@@ -856,6 +914,7 @@ static void tm_rec_start(uint32_t t)            /* the free take begins: the tra
     undo_save();
     for (uint32_t n = 0; n < SEQ_STEPS; n++) step_clear(seq_step(t, n));
     for (uint32_t l = 0; l < NLANE; l++) lane_clear(&pat.lane[t % NTRK][l]);
+    ped_clear_trk(&pat, t); ped_new = (1u << NTRK) - 1u;
     k->len = (uint16_t)SEQ_STEPS; k->ts = k->te = 0; k->pad[1] = 0;
     edited();
     __atomic_fetch_or(&ctl_tm_grow, 1u << (t % NTRK), __ATOMIC_ACQ_REL);
@@ -873,7 +932,7 @@ static void tm_rec_close(uint32_t t)            /* REC again (or STOP): the loop
     if (fine < TM_FINE / 4u) fine = TM_FINE / 4u;
     k->ts = 0; k->te = (uint16_t)fine; k->len = (uint16_t)((fine + TM_FINE - 1u) / TM_FINE);
     __atomic_fetch_and(&ctl_tm_grow, ~(1u << (t % NTRK)), __ATOMIC_ACQ_REL);
-    for (uint32_t n = k->len; n < SEQ_STEPS; n++) step_clear(seq_step(t, n));
+    for (uint32_t n = k->len; n < SEQ_STEPS; n++) { step_clear(seq_step(t, n)); pat.ped[t % NTRK][n][0] = pat.ped[t % NTRK][n][1] = PED_NONE; }
     rec = REC_OFF; rec_wait = 0; memset(rec_open, 0, sizeof rec_open);
     edited();
     m[0] = 0; scat(m, ": LOOP "); fmt_sec(m + slen(m), tm_frames(t, fine)); scat(m, "");
@@ -887,6 +946,7 @@ static void trk_clear(void)                     /* the chosen track emptied (REC
     undo_save();
     for (uint32_t n = 0; n < pat.trk[sel].len; n++) step_clear(seq_step(sel, n));
     for (uint32_t l = 0; l < NLANE; l++) lane_clear(&pat.lane[sel % NTRK][l]);   /* (its recorded knobs too) */
+    ped_clear_trk(&pat, sel);                   /* (22.11.: and its pedal) */
     pat.trk[sel % NTRK].pad[1] = 0;             /* (0.31: no arp take any more) */
     if (pat.trk[sel % NTRK].tm) { pat.trk[sel % NTRK].ts = pat.trk[sel % NTRK].te = 0; __atomic_fetch_and(&ctl_tm_grow, ~(1u << (sel % NTRK)), __ATOMIC_ACQ_REL); }   /* (0.32 TIME: REC records a new loop) */
     edited();
@@ -895,15 +955,17 @@ static void trk_clear(void)                     /* the chosen track emptied (REC
     say_trk(" CLEARED", sel);
 }
 static uint32_t rec_down, rec_down_t, rec_armed_pads, rec_hint;   /* (0.29) rec_armed_pads: pads were hit while REC was held – it armed */
-static void perf_pad_at(uint32_t pad, uint32_t base, int shift_held)   /* row 1: start / stop (REC lit: record; SHIFT: always start/stop), row 2: the track */
+/* (0.41, Sven 27.11.: "rutschend ist schon gut, aber die Pads könnten ja fest sein") rows 1-2 are FIXED: pad n = track n,
+ * row 1 A-D, row 2 E-H – start / stop (REC lit: record), SHIFT + pad: that track chosen (nothing starts). The display, the
+ * mixer's knobs and X1-X4 keep the sliding window of four. */
+static void perf_pad(uint32_t pad, int shift_held)
 {
-    uint32_t t = base + (pad & 3u);
-    pad &= 7u;
-    if (t >= NTRK) return;                      /* (bank E-F: columns 3-4 are dark) */
-    if (pad < 4u) { if (rec && !shift_held) trk_record(t); else trk_launch(t); }
-    else trk_select(t);
+    uint32_t t = pad & 7u;
+    if (t >= NTRK) return;
+    if (shift_held) trk_select(t);
+    else if (rec) trk_record(t);
+    else trk_launch(t);
 }
-static void perf_pad(uint32_t pad, int shift_held) { perf_pad_at(pad, bank0(), shift_held); }
 
 /* ---- the transport: PLAY, STOP, REC (2.0's) */
 static void play_press(void)
@@ -1104,6 +1166,7 @@ static void seq_turn(uint32_t knob, int32_t e)
             return;
         }
         seq_cursor_set(t, (uint32_t)(((int32_t)(seq_cur[t] % len) + e % (int32_t)len + (int32_t)len) % (int32_t)len));
+        seq_edit_moved(t);
         return;
     }
     if (SV_EFF == SV_STEPS && drum_grid()) {    /* (BOOM 0.5) the grid */
@@ -1162,7 +1225,7 @@ static void seq_swap_check(void)
     run_store(&pats[set.pat], ui_pat_old_on); pats_dirty |= 1ull << set.pat;   /* (0.31: and which tracks played in it to its end) */
     {   /* the one left keeps its instruments as they sounded to the end, and its mixer */
         psnd_t *s = &psnd[set.pat]; s->magic = PSN2_MAGIC;
-        for (uint32_t t = 0; t < NTRK; t++) { s->p[t] = snd_old[t]; s->prog[t] = (uint8_t)trk_prog[t]; s->edited[t] = (uint8_t)trk_edited[t]; }
+        for (uint32_t t = 0; t < NTRK; t++) { s->p[t] = snd_old[t]; s->prog[t] = (uint16_t)trk_prog[t]; s->edited[t] = (uint8_t)trk_edited[t]; }
         mx_from_set(&s->mx);
         snd_dirty |= 1ull << set.pat;
     }
@@ -1187,6 +1250,7 @@ static void seq_poll(void)
         else if (ctl_trk_on >> w & 1u && !(trk_pending() >> w & 1u)) { rec_wait = 0; memset(rec_open, 0, sizeof rec_open); }
     }
     if (pre_n && !ctl_count && !rec_wait) pre_flush();   /* (0.31) */
+    ped_rec_poll();                             /* (22.11.) */
     run_poll();                                 /* (0.31) the pattern's tracks on / off */
     { static uint32_t was_on; if (was_on && rec != REC_ON) q_after_take(); was_on = rec == REC_ON; }   /* (0.31) the take over: QUANT */
     if (rec_down && !rec_armed_pads && o3_ms - rec_down_t > 1200u && !rec_hint) {   /* REC held: letting go clears the track (0.29) */

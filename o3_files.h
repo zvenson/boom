@@ -124,12 +124,15 @@ static void f_refresh(void)                     /* the list for the mode (PENDIN
 }
 
 /* ---- a project: "BOMPRJ1" 0, u32 count, then per file: name (16 bytes), u32 size, its bytes */
-#define NPRJ (7u + 3u * NPAT)                    /* settings, plob0, plob1, takes (3.7), takes2, then blob<n>, psnd<n>, paud<n> */
+#define NPRJ_F (3u + NPSECT_OLD + NPSECT)        /* settings, takes (3.7), takes2, plob0 .. plob4 (before 0.41: read, carried into the banks), pbank0 .. pbank10 */
+#define NPRJ (NPRJ_F + 3u * NPAT)                /*   then blob<n>, psnd<n>, paud<n> (matched by name: an older song without plob4 = factory there) */
 static const char *prj_file(uint32_t i)
 {
-    static const char *const F[7] = {"settings", "plob0", "plob1", "plob2", "plob3", "takes", "takes2"};
-    if (i < 7u) return F[i];
-    i -= 7u;
+    static const char *const F[3u + NPSECT_OLD] = {"settings", "takes", "takes2", "plob0", "plob1", "plob2", "plob3", "plob4"};
+    _Static_assert(NPSECT == 11u, "a bank more: its sector is in the song by ps_file (RESET ALL's too, o3_mixer.h)");
+    if (i < 3u + NPSECT_OLD) return F[i];
+    if (i < NPRJ_F) return ps_file(i - 3u - NPSECT_OLD);
+    i -= NPRJ_F;
     return i % 3u == 0u ? PB_FILE_N(i / 3u) : i % 3u == 1u ? PS_FILE_N(i / 3u) : pat_fname("paud", i / 3u);
 }
 #define PRJ_MAX (6u << 20)                      /* (BOOM 0.5: 64 patterns full: ~3.5 MB) */
@@ -200,7 +203,7 @@ static void prj_restart(void)                   /* the storage's files are new: 
     memset(tk, 0, sizeof tk); ld.on = 0; ld_q = tk_save_q = 0; ld_k = sv_k = tk_hold = 0; au_c.type = 0; ctl_au_type = 0;
     pat_used = pats_dirty = snd_dirty = 0; set_dirty = ps_dirty = 0; pat_queue = 0; ctl_pat_swap = 0; ctl_snd_swap = 0; ctl_mx_swap = 0; undo_n = redo_n = 0;
     store_boot();
-    for (uint32_t t = 0; t < NTRK; t++) trk_load(t, set.tprog[t]);
+    for (uint32_t t = 0; t < NTRK; t++) trk_load(t, (uint32_t)(set.tbank[t] % NBANK) * NSLOT + set.tprog[t] % NSLOT);
     mix_apply();
     seq_boot();
     au_boot();
@@ -527,15 +530,15 @@ static void dx_bank_loaded(void)
 {
     const uint8_t *s = prj; uint32_t n = pj.total;
     if (n < 4104u || s[0] != 0xF0 || s[1] != 0x43 || (s[2] & 0xF0) != 0x00 || s[3] != 0x09 || s[4] != 0x20 || s[5] != 0x00) { say("NOT A DX7 BANK (32 VOICES)"); return; }
-    for (uint32_t v = 0; v < 32u && PROG_DX0 + v < NPROG; v++) {
+    for (uint32_t v = 0; v < 32u; v++) {          /* (0.41: DX's slots 17-48, after MEL's 16) */
         patch_t p; uint32_t i;
         patch_defaults(&p); p.v[P_TYPE] = T_DX;
         dx_unpack(s + 6u + v * 128u, p.dx);
         for (i = 0; i < PATCH_NAME; i++) { uint8_t c = p.dx[145u + i]; p.v[NPARAM + i] = c >= 32u && c < 127u ? (c >= 'a' && c <= 'z' ? (uint8_t)(c - 32) : c) : ' '; }
-        prog_put(PROG_DX0 + v, &p);
+        prog_put(BK_DX * NSLOT + NMELDX + v, &p);
     }
-    if (trk_type(sel) == T_DX) { trk_load(sel, PROG_DX0); set_touch(); }
-    say("DX BANK LOADED: 32 SOUNDS IN SLOTS 129-160 (ENCODER B)");
+    if (trk_type(sel) == T_DX) { trk_load(sel, BK_DX * NSLOT + NMELDX); set_touch(); }
+    say("DX BANK LOADED: 32 SOUNDS IN DX 17-48 (ENCODER B)");
 }
 static void ct_loaded(void)                     /* prj holds a file from the card: by its magic */
 {

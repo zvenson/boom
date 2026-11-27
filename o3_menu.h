@@ -23,7 +23,7 @@ static void overview(void)
     if (page == PG_MIXER) mixer_knobs(k); else if (sq) seq_knobs(k); else if (page == PG_SCALE) scale_knobs(k); else page_knobs(k);
     ov_cell(6, 30, 92, 40, "↩", k_lock ? "K = NOTES" : "K LOCK", "HELD: UNDO", k_lock ? TRK_RGB[sel] : 0);   /* (3.8: held + ENC 1 back / forward, 2 s: one back) */
     for (int i = 0; i < 4; i++) { char n[2] = {(char)('1' + i), 0}; ov_cell(104 + i * 74, 30, 70, 40, n, k[i].label ? k[i].label : "", k[i].label ? k[i].value : "", ACCENT); }
-    ov_cell(404, 30, 70, 40, "DATA", shift ? "TEMPO" : save_armed ? "SLOT" : sq && SV_ENTRY(seq_view) ? "BAR" : sq || page == PG_MIXER ? "PATTERN" : page == PG_GLOBAL ? "MIDI OUT" : "PATCH", "", ACCENT);
+    ov_cell(404, 30, 70, 40, "DATA", shift ? "TEMPO" : save_armed ? "SLOT" : sq && (SV_ENTRY(seq_view) || (seq_view == SV_TRACK && !au_is(sel) && !pat.trk[sel].tm)) ? "EDIT" : sq || page == PG_MIXER ? "PATTERN" : page == PG_GLOBAL ? "MIDI OUT" : "PATCH", "", ACCENT);
     { static const char *FN[6] = {"MIXER", "TRACKS", "LOAD", "SAVE", "STORE", "GLOBAL"}, *FSH[6] = {"", "", "OCT -", "OCT +", "HOLD", "UNDO"};
       for (int i = 0; i < 6; i++) { char n[3] = {'F', (char)('1' + i), 0}; ov_cell(6 + i * 78, 76, 74, 40, n, shift && FSH[i][0] ? FSH[i] : FN[i], "", 0x00E5FF); } }
     ov_cell(6, 122, 74, 40, "SHIFT", shift ? "HELD" : "2ND LAYER", "", shift ? 0x00E5FF : 0);
@@ -48,9 +48,9 @@ static void overview(void)
     ov_cell(84, 262, 74, 52, "STOP", "STOP", "", 0); ov_cell(162, 262, 72, 52, "PLAY", "START", "", GREEN);
     {   /* the pads, row by row */
         int dr = trk_type(sel) == T_DRUMS;
-        static const char *const TROWS6[4] = {"START / STOP", "SELECT TRACK", "NOTES", "NOTES"};
-        const char *const ROWS[4] = {"START / STOP", "SELECT TRACK", dr ? (live_p[sel].v[P_KIT_SRC] == 2u ? "KICK SNARE SNARE 2 RIM" : live_p[sel].v[P_KIT_SRC] ? "KICK SNARE TOM HI TOM LO" : "KICK SNARE CLAP RIM") : "NOTES", dr ? (live_p[sel].v[P_KIT_SRC] == 2u ? "HAT OPEN KICK 2 CRASH" : live_p[sel].v[P_KIT_SRC] ? "HAT OPEN RIDE CRASH" : "CH OH SNAP PERC") : set.sc_pads ? "NOTES" : "NOTES: SCALE"};
-        static const char *const MROWS[4] = {"START / STOP", "MUTE (SHIFT: SOLO)", "MUTE (SHIFT: SOLO)", "SELECT TRACK"};
+        static const char *const TROWS6[4] = {"START A–D", "START E–H", "NOTES", "NOTES"};   /* (0.41: fixed; SHIFT + pad: choose) */
+        const char *const ROWS[4] = {"START A–D", "START E–H", dr ? (live_p[sel].v[P_KIT_SRC] == 2u ? "KICK SNARE SNARE 2 RIM" : live_p[sel].v[P_KIT_SRC] ? "KICK SNARE TOM HI TOM LO" : "KICK SNARE CLAP RIM") : "NOTES", dr ? (live_p[sel].v[P_KIT_SRC] == 2u ? "HAT OPEN KICK 2 CRASH" : live_p[sel].v[P_KIT_SRC] ? "HAT OPEN RIDE CRASH" : "CH OH SNAP PERC") : set.sc_pads ? "NOTES" : "NOTES: SCALE"};
+        static const char *const MROWS[4] = {"START A–D", "START E–H", "MUTE A–D (+SHIFT SOLO)", "MUTE E–H (+SHIFT SOLO)"};
         static const char *const SROWS[4] = {"STEPS 1–4", "STEPS 5–8", "STEPS 9–12", "STEPS 13–16"};
         const char *const *TROWS = TROWS6;
         int mx = page == PG_MIXER, st = sq && SV_ENTRY(seq_view), tr = sq && seq_view == SV_TRACKS;
@@ -58,11 +58,11 @@ static void overview(void)
         for (int r = 0; r < 4; r++) {
             int y = 188 + r * 32;
             for (int c = 0; c < 4; c++) {
-                uint32_t col = st ? KEY_RGB[CK_SEQ] : (mx ? r == 3 : r == 1) ? TRK_RGB[col_trk((uint32_t)c)] : r == 0 ? (rec ? RED : GREEN) : mx ? RED : DIM;
+                uint32_t col = st ? KEY_RGB[CK_SEQ] : r < 2 ? TRK_RGB[(uint32_t)(r * 4 + c) % NTRK] : mx ? RED : DIM;   /* (0.41: rows 1-2 = A-H in their colours) */
                 vg_round(242 + c * 26, y, 22, 26, 3, vg_mix(0x000000, col, 0.55f));
             }
-            vg_text(st ? SROWS[r] : mx ? MROWS[r] : tr ? TROWS[r] : (r == 0 && rec) ? "RECORD" : ROWS[r], 350, y + 7, VG_SMALL, FG, VG_LEFT);
+            vg_text(st ? SROWS[r] : mx ? MROWS[r] : tr ? TROWS[r] : (r < 2 && rec) ? (r ? "RECORD E–H" : "RECORD A–D") : ROWS[r], 350, y + 7, VG_SMALL, FG, VG_LEFT);
+            if (!st && r < 2) for (int c = 0; c < 4; c++) { char l[2] = {(char)('A' + r * 4 + c), 0}; vg_text(l, 253 + c * 26, y + 6, VG_BOLD, 0x000000, VG_CENTER); }   /* (0.41: the letter on its pad) */
         }
-        for (int c = 0; c < 4; c++) { uint32_t t = col_trk((uint32_t)c); if (t >= NTRK) continue; char l[2] = {(char)('A' + t), 0}; vg_text(l, 253 + c * 26, 172, VG_BOLD, TRK_RGB[t], VG_CENTER); }
     }
 }

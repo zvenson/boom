@@ -25,6 +25,7 @@ static void dial(int cx, int cy, int r, float v, int bip, uint32_t col)
 {
     const float span = 0.75f;                   /* from 7:30 round to 4:30 */
     float px = 0, py = 0;
+    { int e = (cx - 10) / 115; if (cx >= 10 && e < 4) vibe_led_ring(e, v, bip); }   /* (27.11.: the iPad's knobs 1-4 turn along – a knob in column e is encoder e) */
     for (int i = 0; i <= 48; i++) {
         float t = i / 48.0f, a = 0.625f - span * t;
         float x = cx + vd_sin(a + 0.25f) * r, y = cy - vd_sin(a) * r;

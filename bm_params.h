@@ -81,10 +81,57 @@ _Static_assert(NPARAM + PATCH_NAME <= PATCH_BYTES, "the patch outgrew PATCH_BYTE
 #define P_EP_NOISE P_S_SNAP                     /* the hammer's thump and the key's noise */
 #define P_EP_VELO P_C_SPREAD                    /* how much the touch matters */
 #define P_EP_STEREO P_C_TONE                    /* tremolo: 0 = the amp's (volume) .. 127 = the suitcase's (left-right) */
-#define NPROG 200u                              /* (0.6: 129-160 DX · 0.9: 161-176 STRINGS · 0.19: 177-184 SAMPLER · 0.30: 185-192 MIDI · 0.31: 193-200 E-PIANO) */
+/* (0.41, Sven 21.11.: "WAVETABLE") WAVETABLE: two oscillators reading one table of eight frames, POSITION scans through
+ * them – its knobs live on MEL's bytes (a wavetable sound is never FM): the table on ALGO (eight), the rest on the operators */
+#define P_WT_TABLE P_ALGO                       /* which table: 0..7 (WT_NAME) */
+#define P_WT_POS P_OP1_LVL                      /* where in the table: 0 = its first frame .. 127 = its last */
+#define P_WT_PATT P_OP1_ATT                     /* the position's own envelope: attack */
+#define P_WT_PDEC P_OP1_DEC                     /*   and decay (127: it holds) */
+#define P_WT_PENV P_OP2_LVL                     /*   and how far it moves the position (64 = not at all, bipolar) */
+#define P_WT_LFO P_OP3_LVL                      /* the LFO on the position */
+#define P_WT_O2 P_OP4_LVL                       /* oscillator 2's level (the same table, the same position) */
+#define P_WT_SEMI P_OP2_RATIO                   /* oscillator 2's interval: 0..23 = -12..+11 semitones (12 = unison) */
+#define P_WT_DET P_FB                           /* oscillator 2's detune: 0..50 cents */
+#define P_WT_SUB P_OP4_DEC                      /* a sine an octave under oscillator 1 */
+/* (0.41, Sven 21.11.: "ein echtes Piano – Grand Piano") PIANO: a sampled concert grand (bm_grand.h) – its knobs on the
+ * synth drums' bytes, as E-PIANO's (a piano never plays a kit) */
+#define P_GP_TONE P_K_TUNE                      /* brighter / darker than recorded (64 = as recorded) */
+#define P_GP_HAMMER P_K_PUNCH                   /* the touch picks softer / harder recordings (64 = as played) */
+#define P_GP_DECAY P_K_DRIVE                    /* how long a note rings (127 = as long as the piano) */
+#define P_GP_VELO P_C_SPREAD                    /* how much the touch changes the level */
+#define P_GP_SPREAD P_C_TONE                    /* the keys left to right across the stereo picture */
+/* (0.41, Sven 21.11.: "ein Clavinett", then "Clav bitte in E-Piano schieben") E-PIANO's third MODEL, CLAV: a struck string with
+ * two pickups, modelled – on the drums' bytes as E-PIANO's knobs (TONE, DECAY, TOUCH are the same bytes and mean the same);
+ * a voice of it runs as T_CV inside (the kind T_CV is not offered by TYPE) */
+#define P_EP_CLAV P_ST_16                       /* E-PIANO: 1 = the CLAV model (0 in every E-PIANO sound before it) */
+#define P_CV_PICKUP P_O1_WAVE                   /* NECK · BRIDGE · BOTH · OUT (both out of phase: thin) – a byte of 0..3 */
+#define P_CV_TONE P_K_TUNE                      /* the strike: dull .. bright */
+#define P_CV_MUTE P_K_PUNCH                     /* the muting felt on the strings: rings .. plucked short */
+#define P_CV_DECAY P_K_DRIVE                    /* how long a held note rings */
+#define P_CV_WAH P_S_TUNE                       /* the envelope filter: how far each strike opens it (0 = off) */
+#define P_CV_WRES P_S_TONE                      /*   its resonance */
+#define P_CV_WSPD P_S_DECAY                     /*   how fast it closes again */
+#define P_CV_CLICK P_S_SNAP                     /* the key's thump on the strike and the damper's pluck when let go */
+#define P_CV_VELO P_C_SPREAD                    /* how much the touch matters */
+/* (0.41) a DX sound's extra gain (MEL's sounds as DX voices are quieter than MEL was): STRINGS' 16' byte, 0 in every DX
+ * sound saved so far – 0 = as before, 127 = x4 */
+#define P_DX_GAIN P_ST_16
+#define NPROG_OLD 217u                              /* (0.6: 129-160 DX · 0.9: 161-176 STRINGS · 0.19: 177-184 SAMPLER · 0.30: 185-192 MIDI · 0.31: 193-200 E-PIANO · 0.41: 201-208 WAVETABLE · 209 PIANO · 210-217 E-PIANO's CLAVs) */
 #define NPROG_06 128u                              /* 1-16 kits (DRUMS), 17-32 BASS, 33-64 MEL, 65-128 SYNTH (OberVave's 64); the user's saves over them */
-enum { T_DRUMS, T_BASS, T_MEL, T_SYNTH, T_DX, T_STR, T_SMP, T_MIDI, T_EP, NTYPE };   /* (append only: P_TYPE is saved) */
-static const char *const TYPE_NAME[NTYPE] = {"DRUMS", "BASS", "MEL", "OBERVAVE", "DX", "STRINGS", "SAMPLER", "MIDI", "E-PIANO"};   /* (Sven 14.11.: the kind is called what it is) */
+enum { T_DRUMS, T_BASS, T_MEL, T_SYNTH, T_DX, T_STR, T_SMP, T_MIDI, T_EP, T_WT, T_GP, T_CV, NTYPE };   /* (append only: P_TYPE is saved) */
+static const char *const TYPE_NAME[NTYPE] = {"DRUMS", "BASS", "MEL", "OBERVAVE", "DX", "STRINGS", "SAMPLER", "MIDI", "E-PIANO", "WAVETABLE", "PIANO", "CLAV"};
+/* (0.41, Sven 21.11.: MEL and DX "zusammenlegen") the kinds TYPE offers, in its order – MEL is not among them any more: its
+ * sounds are a bank of DX voices now (slots 33-48), an older project's MEL track still plays as it did */
+#if __has_include("bm_grand_private.h")    /* (0.41) the recorded PIANO is private (bm_grand.h): without it TYPE skips PIANO */
+#define BOOM_PIANO 1
+static const uint8_t TYPE_ORDER[] = {T_DRUMS, T_BASS, T_SYNTH, T_DX, T_WT, T_STR, T_GP, T_EP, T_SMP, T_MIDI};
+#else
+#define BOOM_PIANO 0
+static const uint8_t TYPE_ORDER[] = {T_DRUMS, T_BASS, T_SYNTH, T_DX, T_WT, T_STR, T_EP, T_SMP, T_MIDI};
+#endif
+#define NTYPE_ORDER (sizeof TYPE_ORDER / sizeof TYPE_ORDER[0])
+#define NWT 8u
+static const char *const WT_NAME[NWT] = {"ANALOG", "PULSE", "VOCAL", "ORGAN", "SYNC", "FOLD", "BELL", "COMB"};   /* (0.41) the tables (bm_wavetable.h) */   /* (Sven 14.11.: the kind is called what it is) */
 #define PROG_BASS0 16u
 #define PROG_MEL0 32u
 #define PROG_SYNTH0 64u
@@ -93,8 +140,45 @@ static const char *const TYPE_NAME[NTYPE] = {"DRUMS", "BASS", "MEL", "OBERVAVE",
 #define PROG_SMP0 176u
 #define PROG_MIDI0 184u
 #define PROG_EP0 192u
-static uint32_t prog_type_dflt(uint32_t n) { return n < PROG_BASS0 ? T_DRUMS : n < PROG_MEL0 ? T_BASS : n < PROG_SYNTH0 ? T_MEL : n < PROG_DX0 ? T_SYNTH : n < PROG_STR0 ? T_DX : n < PROG_SMP0 ? T_STR : n < PROG_MIDI0 ? T_SMP : n < PROG_EP0 ? T_MIDI : T_EP; }   /* a factory slot's kind */
-static uint32_t type_prog0(uint32_t ty) { return ty == T_DRUMS ? 0u : ty == T_BASS ? PROG_BASS0 : ty == T_MEL ? PROG_MEL0 : ty == T_SYNTH ? PROG_SYNTH0 : ty == T_DX ? PROG_DX0 : ty == T_STR ? PROG_STR0 : ty == T_SMP ? PROG_SMP0 : ty == T_MIDI ? PROG_MIDI0 : PROG_EP0; }   /* its first slot */
+#define PROG_WT0 200u
+#define PROG_GP0 208u
+#define PROG_EPC0 209u                          /* (0.41) E-PIANO's CLAV sounds */
+#define NCVPU 4u
+static const char *const CV_PU_NAME[NCVPU] = {"NECK", "BRIDGE", "BOTH", "OUT"};   /* (0.41) CLAV's pickups */
+#define NMELDX 16u                              /* (0.41) slots 33-48: MEL's sixteen sounds, as DX voices (bm_mel2dx.h) */
+/* (0.41, Sven 21.11.: "für jeden Sound 128 Plätze", "bei 9 WAVE INIT") the programs: a BANK of 128 slots per kind – its
+ * factory sounds first, then INIT slots; every slot can be saved over. A program number is bank * 128 + slot; the files
+ * keep the slot (the kind is the sound's own). The numbers before (one row of 217 for all kinds, PROG_*0 above) are read
+ * by prog_from_old. BK_MEL keeps an older project's MEL sounds (MEL is not offered any more). */
+#define NSLOT 128u
+enum { BK_DRUMS, BK_BASS, BK_SYNTH, BK_DX, BK_WT, BK_STR, BK_GP, BK_EP, BK_SMP, BK_MIDI, BK_MEL, NBANK };
+static const uint8_t BANK_TYPE[NBANK] = {T_DRUMS, T_BASS, T_SYNTH, T_DX, T_WT, T_STR, T_GP, T_EP, T_SMP, T_MIDI, T_MEL};
+static const char *const BANK_AB[NBANK] = {"DR", "BS", "OB", "DX", "WT", "ST", "PN", "EP", "SM", "MI", "ME"};   /* (an INIT slot's name: "WT INIT 9") */
+#define NPROG (NBANK * NSLOT)
+static uint32_t bank_of(uint32_t ty) { for (uint32_t b = 0; b < NBANK; b++) if (BANK_TYPE[b] == ty) return b; return ty == T_CV ? BK_EP : BK_DRUMS; }
+static uint32_t prog_type_dflt(uint32_t n) { return BANK_TYPE[(n / NSLOT) % NBANK]; }   /* a slot's kind: its bank's */
+static uint32_t type_prog0(uint32_t ty) { return bank_of(ty) * NSLOT; }   /* its first slot */
+#define NEP_OLD 8u                              /* (the E-PIANO sounds before the CLAVs) */
+static uint32_t prog_from_old(uint32_t o, uint32_t ty)   /* a program number of 0.40 / 0.41-dev → bank * 128 + slot (ty: the sound's kind, NTYPE: not known) */
+{
+    uint32_t b, s;
+    if (ty == T_MEL || (ty >= NTYPE && o >= PROG_MEL0 && o < PROG_SYNTH0)) return BK_MEL * NSLOT + (o >= PROG_MEL0 && o < PROG_SYNTH0 ? o - PROG_MEL0 : 0u);   /* (0.40: 33-64 were MEL) */
+    if (o < PROG_BASS0) { b = BK_DRUMS; s = o; }
+    else if (o < PROG_MEL0) { b = BK_BASS; s = o - PROG_BASS0; }
+    else if (o < PROG_MEL0 + NMELDX) { b = BK_DX; s = o - PROG_MEL0; }
+    else if (o < PROG_SYNTH0) { b = BK_MEL; s = o - PROG_MEL0; }
+    else if (o < PROG_DX0) { b = BK_SYNTH; s = o - PROG_SYNTH0; }
+    else if (o < PROG_STR0) { b = BK_DX; s = NMELDX + o - PROG_DX0; }
+    else if (o < PROG_SMP0) { b = BK_STR; s = o - PROG_STR0; }
+    else if (o < PROG_MIDI0) { b = BK_SMP; s = o - PROG_SMP0; }
+    else if (o < PROG_EP0) { b = BK_MIDI; s = o - PROG_MIDI0; }
+    else if (o < PROG_WT0) { b = BK_EP; s = o - PROG_EP0; }
+    else if (o < PROG_GP0) { b = BK_WT; s = o - PROG_WT0; }
+    else if (o < PROG_EPC0) { b = BK_GP; s = 0; }
+    else { b = BK_EP; s = NEP_OLD + o - PROG_EPC0; }
+    if (ty < NTYPE && BANK_TYPE[b] != ty) b = bank_of(ty);   /* (a sound kept where another kind's row was: its own kind's bank) */
+    return b * NSLOT + s % NSLOT;
+}
 
 enum { K_NUM, K_BIP, K_ONOFF, K_MODE, K_LSHAPE, K_LPHASE, K_ARP, K_DIV, K_MS, K_HZ, K_PCT, K_CUT, K_OCT, K_DDIV,
        K_TYPE, K_DTYPE, K_BGATE, K_SLIDE, K_ALGO, K_RATIO, K_LVL, K_SEMI, K_WAVE, K_FTYPE, K_TO, K_MORPH, K_DXALGO, K_DXFB, K_DMODE, K_RMODE, K_KSRC, K_SMTRK, K_SMN, K_SMCHOP, K_SMQ, K_SMPOS, K_SMPM, K_SMPITCH, K_SMFINE, K_MICH, K_MIPROG, K_MIVEL };
@@ -347,9 +431,17 @@ typedef struct { const char *title; int16_t p[4]; } page_t;
 #define PS_GAIN 402                             /* (0.31) SHIFT on the SAMPLER's EDIT page: its input's GAIN */
 #define PS_THR 403                              /*        and its THRESHOLD */
 #define PS_REV 404                              /*        and REVERSE (F4 is TRIM now) */
+#define PS_OP 405                               /* (0.41) DX's OP pages: which operator (1-6) */
+#define PS_OPRATIO 406                          /*   its frequency ratio (coarse + fine) */
+#define PS_OPLVL 407                            /*   its output level */
+#define PS_OPATT 408                            /*   its attack (rate 1) */
+#define PS_OPDEC 409                            /*   its decay (rate 2) */
+#define PS_OPSUS 410                            /*   its sustain level (level 3) */
+#define PS_OPREL 411                            /*   its release (rate 4) */
+#define PS_EPMODEL 412                          /* (0.41) E-PIANO's MODEL: TINE · REED · CLAV (two bytes: P_EP_MODEL, P_EP_CLAV) */
 enum { PG_PERFORM, PG_S1, PG_S2, PG_S3, PG_S4, PG_S5, PG_S6, PG_S7, PG_FENV, PG_AENV, PG_LFO, PG_LFODEST, PG_ARP,
        PG_CHORUS, PG_DELAY, PG_REVERB, PG_DRIVE, PG_OUTPUT, PG_GLOBAL, PG_SCALE, PG_MIXER, PG_SEQ, NPAGE };
-static const uint8_t SND_N[NTYPE] = {8, 6, 8, 7, 4, 4, 4, 3, 6};   /* SOUND's pages per kind (TYPE comes after them) */
+static const uint8_t SND_N[NTYPE] = {8, 6, 8, 7, 6, 4, 4, 3, 6, 6, 4, 5};   /* SOUND's pages per kind (TYPE comes after them) */
 #define SND_N_AC 6u                             /* the acoustic kit's pages: SPAGE[NTYPE] */
 static const page_t SPAGE[NTYPE + 1u][10] = {
     {   /* DRUMS */
@@ -404,7 +496,9 @@ static const page_t SPAGE[NTYPE + 1u][10] = {
         {"TONE", {P_DX_ALGO, P_DX_FB, P_VOLUME, -1}},
         {"FILTER", {P_CUTOFF, P_RESO, P_FENV_AMT, P_LFO_FLT}},
         {"VOICE", {P_MODE, P_GLIDE, P_BEND, P_VOLUME}},
-        {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
+        {"OP", {PS_OP, PS_OPRATIO, PS_OPLVL, PS_OPATT}},   /* (0.41) an operator of the voice itself, as MEL's OP pages */
+        {"OP ENV", {PS_OP, PS_OPDEC, PS_OPSUS, PS_OPREL}},
+        {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
         {"FILTER ENV", {P_FA, P_FD, P_FS, P_FR}},
         {"DX ENV", {P_DX_ATTACK, P_DX_DECAY, P_DX_RELEASE, P_DX_BRIGHT}},
     },
@@ -435,7 +529,7 @@ static const page_t SPAGE[NTYPE + 1u][10] = {
     },
     {   /* (0.31) E-PIANO: tines or reeds, the pickup, the tremolo (labels: ep_label in o3_pages.h) */
         {"PERFORM", {P_EP_TONE, P_EP_BARK, P_EP_TREM, P_EP_DECAY}},
-        {"PIANO", {P_EP_MODEL, P_EP_TONE, P_EP_BELL, P_EP_NOISE}},
+        {"PIANO", {PS_EPMODEL, P_EP_TONE, P_EP_BELL, P_EP_NOISE}},
         {"PICKUP", {P_EP_BARK, P_EP_DRIVE, P_EP_VELO, P_VOLUME}},
         {"TREMOLO", {P_EP_TREM, P_EP_RATE, P_EP_STEREO, -1}},
         {"FILTER", {P_CUTOFF, P_RESO, P_FENV_AMT, P_LFO_FLT}},
@@ -443,6 +537,36 @@ static const page_t SPAGE[NTYPE + 1u][10] = {
         {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
         {"FILTER ENV", {P_FA, P_FD, P_FS, P_FR}},
         {"AMP ENV", {P_AA, P_EP_DECAY, P_AR, -1}},
+    },
+    {   /* (0.41) WAVETABLE: a table of eight frames, POSITION through it (labels: wt_label in o3_pages.h) */
+        {"PERFORM", {P_WT_POS, P_WT_PENV, P_CUTOFF, P_RESO}},
+        {"WAVE", {P_WT_TABLE, P_WT_POS, P_WT_LFO, P_VOLUME}},
+        {"POS ENV", {P_WT_PENV, P_WT_PATT, P_WT_PDEC, P_WT_POS}},
+        {"OSC 2", {P_WT_O2, P_WT_SEMI, P_WT_DET, P_WT_SUB}},
+        {"FILTER", {P_CUTOFF, P_RESO, P_FENV_AMT, P_LFO_FLT}},
+        {"VOICE", {P_MODE, P_GLIDE, P_BEND, P_VOLUME}},
+        {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
+        {"FILTER ENV", {P_FA, P_FD, P_FS, P_FR}},
+        {"AMP ENV", {P_AA, P_AD, P_AS, P_AR}},
+    },
+    {   /* (0.41) PIANO: the sampled grand (labels: gp_label in o3_pages.h) */
+        {"PERFORM", {P_GP_TONE, P_GP_HAMMER, P_GP_DECAY, P_AR}},
+        {"PIANO", {P_GP_TONE, P_GP_HAMMER, P_GP_VELO, P_GP_SPREAD}},
+        {"FILTER", {P_CUTOFF, P_RESO, P_FENV_AMT, P_LFO_FLT}},
+        {"VOICE", {P_MODE, P_BEND, P_GP_DECAY, P_VOLUME}},
+        {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
+        {"FILTER ENV", {P_FA, P_FD, P_FS, P_FR}},
+        {"AMP ENV", {P_AA, P_GP_DECAY, P_AR, -1}},
+    },
+    {   /* (0.41) E-PIANO with MODEL CLAV: the struck string, the pickups, the envelope filter (labels: cv_label in o3_pages.h) */
+        {"PERFORM", {P_CV_TONE, P_CV_MUTE, P_CV_WAH, P_CV_DECAY}},
+        {"STRING", {PS_EPMODEL, P_CV_PICKUP, P_CV_MUTE, P_CV_CLICK}},
+        {"WAH", {P_CV_WAH, P_CV_WRES, P_CV_WSPD, P_CV_VELO}},
+        {"FILTER", {P_CUTOFF, P_RESO, P_FENV_AMT, P_LFO_FLT}},
+        {"VOICE", {P_MODE, P_GLIDE, P_BEND, P_VOLUME}},
+        {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}}, {"", {-1, -1, -1, -1}},
+        {"FILTER ENV", {P_FA, P_FD, P_FS, P_FR}},
+        {"AMP ENV", {P_AA, P_CV_DECAY, P_AR, -1}},
     },
     {   /* (0.13) DRUMS with the acoustic kit: each drum's tune and decay */
         {"PERFORM", {P_K_DECAY, P_S_DECAY, P_OH_DECAY, P_CUTOFF}},

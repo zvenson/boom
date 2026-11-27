@@ -15,6 +15,9 @@ This program contains parts from others:
    (https://github.com/sfzinstruments/virtuosity_drums), CC0-1.0 (public domain dedication).
    Mixed, tuned, compressed and resampled for BOOM FM.
 
+3. The PIANO kind's recordings are NOT included: they were sampled from a digital piano whose sound belongs to its
+   maker. bm_grand.h holds silence instead; private builds add bm_grand_private.h + bm_grand_d*.inc (git-ignored).
+
 Product names such as 808, DX7, MPC or SP-1200 are trademarks of their owners and are used only
 to describe a kind of sound. BOOM FM is not affiliated with them. "VIBE FM" is a trademark of
 Sven Trogus.

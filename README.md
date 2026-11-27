@@ -19,11 +19,12 @@ AU) and the browser run the same `.wasm`. Its controls, sequencer, mixer, effect
 |---|---|
 | **DRUMS** | eight synth drums (KICK SNARE CLAP CH OH RIM SNAP PERC, the closed hat chokes the open one) – or an **acoustic kit** and a **hip hop kit** from samples |
 | **BASS** | a playable 808: mono, punch, click, sub, three drives, DECAY or GATE, SLIDE legato or always |
-| **MEL** | 4-operator FM: 8 algorithms, feedback, 8 voices, filter, envelopes, LFO, arp – bells, plucks, keys, pads |
 | **OBERVAVE** | the analog poly synth with its 64 sounds |
-| **DX** | a DX7 voice (6 operators, 32 algorithms) under four macros; loads `.syx` banks from the card |
+| **DX** | a DX7 voice (6 operators, 32 algorithms) under four macros and OP pages (each operator's ratio, level, envelope); loads `.syx` banks from the card. Its first 16 sounds are the former MEL kind's (4-op FM), rewritten as DX7 voices |
+| **WAVETABLE** | two oscillators and a sub reading one of 8 tables (ANALOG, PULSE, VOCAL, ORGAN, SYNC, FOLD, BELL, COMB) of 8 frames each – POSITION moves through them, with its own envelope and the LFO; 8 voices |
 | **STRINGS** | a string ensemble: 16' / 8' / 4' registers through a three-line chorus |
-| **E-PIANO** | an electric piano: struck tines or reeds, a pickup that barks when played hard, preamp, mono or stereo tremolo |
+| **PIANO** | a sampled grand – **only in private builds**: its recordings are not part of this repository (they come from a digital piano whose sound belongs to its maker). Without them TYPE does not offer PIANO and a saved PIANO track stays silent |
+| **E-PIANO** | an electric piano: MODEL **TINE** or **REED** (struck tines or reeds, a pickup that barks when played hard, preamp, mono or stereo tremolo) – or **CLAV**: a struck, damped string with two pickups (NECK, BRIDGE, BOTH, OUT of phase), modelled, with the felt's MUTE, the key's CLICK and an envelope filter (WAH, RESO, SPEED) |
 | **SAMPLER** | record or load a sample, play it in tune or chop it into slices (even or on the hits), four quality steps from clean to lo-fi |
 | **MIDI** | silent – the track's notes, program and four CCs go out to an external synth |
 | **AUDIO** | takes per pattern from IN 1 / IN 2 – or up to 16 inputs of an interface, armed and recorded at once (multitrack) |
@@ -36,6 +37,9 @@ AU) and the browser run the same `.wasm`. Its controls, sequencer, mixer, effect
 - **TRACK**: every track as a time line – notes where they play, how high and how long, the beats and bars behind them;
   an audio track's wave on the same grid.
 - **TIME**: a track without bars – record notes or audio freely, REC closes the loop, START / END snap onto the beats.
+- **Sustain pedal** (the VIBE's PEDAL jack or MIDI CC 64): holds the notes of the track it plays – REC records it as its own
+  events beside the notes, where it went down and up, never quantised; a take's first pedal replaces the track's old one;
+  a MIDI track sends it on as CC 64. Clearing a track clears its pedal.
 - Mixer EQ per track (LOW / MID / HIGH). SAMPLER: TRIM cuts away what lies outside START–END, NORMALIZE, a recording threshold.
 - Mixer rows LEVEL · FX · PAN · DELAY · REVERB · CHORUS · DRIVE · MASTER. Delay ANALOG / DIGITAL / TAPE, reverb HALL / ROOM / PLATE,
   drive OVERDRIVE / DIST / FUZZ / CRUSH or a **tube amp** as an insert on any track.
@@ -47,6 +51,12 @@ AU) and the browser run the same `.wasm`. Its controls, sequencer, mixer, effect
 In the VIBE FM plugin each track gets its own MIDI channel (1–8) and seven tracks their own stereo outputs. Every sound,
 mixer and master parameter can be automated, MIDI channel 16 switches patterns, a track can play the DAW's notes instead of
 its steps, and F4 SAVE → MIDI exports a pattern as a MIDI file. Projects are versioned: a newer BOOM FM opens an older one.
+
+**Sounds:** every kind has **128 program slots** (encoder B steps through them and stops at 1 and 128): its factory sounds
+first – DRUMS 32, BASS 24, OBERVAVE 72, DX 48, WAVETABLE 24, STRINGS 20, E-PIANO 25 (with the CLAVs), SAMPLER 8,
+MIDI 16 – then INIT slots ("WT INIT 25"). F5 stores the track's sound in any slot of its kind (DATA picks it); while "SAVE
+HERE?" shows, ENTER gives that slot its factory sound back. A **MIDI program change 0–127 selects slot 1–128 of the
+track's kind**. Older projects and stored sounds are carried over: each stored sound into its kind's bank at the place it had.
 
 ## Controls
 
@@ -74,4 +84,4 @@ Copyright 2026 Sven Trogus (zvenson). If you use BOOM FM or any part of it, keep
 
 Third-party parts (see `NOTICE`): the DX7 engine is a port of Dexed's msfa (Copyright 2012 Google Inc., 2016–2025
 Pascal Gauthier, Apache-2.0, `LICENSE-APACHE-2.0`); the acoustic and hip hop kits are made from Virtuosity Drums by
-Versilian Studios (CC0-1.0). The name BOOM FM and the logo are not part of the license; VIBE FM is a trademark of Sven Trogus.
+Versilian Studios (CC0-1.0); the recorded PIANO is not included (see `NOTICE`). The name BOOM FM and the logo are not part of the license; VIBE FM is a trademark of Sven Trogus.

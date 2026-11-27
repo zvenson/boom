@@ -61,26 +61,48 @@ static int psect_load(const char *name, psect_t *ps, int *legacy)
 static uint32_t set_dirty, ps_dirty, store_t, store_force;   /* store_force: VIBE_EV_SAVE – everything now (SDK 21) */   /* ps_dirty: bit i = program sector i; written ~1.5 s after the last change */
 static void set_touch(void) { set_dirty = 1; store_t = o3_ms; }
 
+static uint32_t mig_del;                        /* (0.41) the old program sectors, to delete once the banks are written */
+static const char *ps_file(uint32_t b) { static char n[12]; n[0] = 0; scat(n, "pbank"); fmt_u(n + 5, b); return n; }   /* (0.41) bank b's sector */
 static void store_boot(void)                    /* the settings and the programs as they were, else the defaults */
 {
-    uint32_t n;
-    static const char *const PS[NPSECT] = {"plob0", "plob1", "plob2", "plob3"};
+    uint32_t n, have = 0;
+    static const char *const PSO[NPSECT_OLD] = {"plob0", "plob1", "plob2", "plob3", "plob4"};
     for (n = 0; n < NPSECT; n++) {
         int legacy = 0;
-        if (psect_load(PS[n], &psect[n], &legacy) || psect[n].tag != PS_TAG) { memset(&psect[n], 0, sizeof psect[n]); psect[n].tag = PS_TAG; }
-        else if (legacy) ps_dirty |= 1u << n;   /* (a 0.3 sector: written anew in the versioned format) */
+        if (psect_load(ps_file(n), &psect[n], &legacy) || psect[n].tag != PS_TAG) { memset(&psect[n], 0, sizeof psect[n]); psect[n].tag = PS_TAG; }
+        else have = 1;
     }
-    pk_valid = 0;
+    if (!have) {                                /* (0.41) no bank written yet: the programs of before (one row of 217, 50 a sector), each into its kind's bank */
+        static psect_t old;
+        for (n = 0; n < NPSECT_OLD; n++) {
+            int legacy = 0;
+            if (psect_load(PSO[n], &old, &legacy) || old.tag != PS_TAG) continue;
+            mig_del |= 1u << n;
+            for (uint32_t i = 0; i < PS_N_OLD; i++) {
+                if (!old.used[i]) continue;
+                patch_t *p = &old.p[i]; uint32_t ty = p->v[P_TYPE] % NTYPE, g, b, s;
+                if (ty == T_CV) { p->v[P_TYPE] = T_EP; p->v[P_EP_CLAV] = 1; p->v[P_EP_MODEL] = 0; ty = T_EP; }   /* (a CLAV of 0.41-dev: E-PIANO's now) */
+                g = prog_from_old(n * PS_N_OLD + i, ty); b = g / NSLOT; s = g % NSLOT;
+                if (psect[b].used[s]) continue;
+                psect[b].p[s] = *p; psect[b].used[s] = 1; ps_dirty |= 1u << b;
+            }
+        }
+        if (mig_del && !ps_dirty) ps_dirty = 1u;   /* (nothing to carry: still write a bank, so this runs once) */
+    }
     if (st_load("settings", &set, sizeof set) || set.version != SET_VERSION) settings_defaults();
     if (set.smc_ok != SMC_OK) { memset(set.smc, 0, sizeof set.smc); memset(set.smc_n, 0, sizeof set.smc_n); set.smc_ok = SMC_OK; }   /* (0.21) */
     if (set.sc_ok != 0x5Cu) { set.sc_key = set.sc_scale = set.sc_chord = set.sc_pads = 0; set.sc_ok = 0x5Cu; }   /* (before 3.10) */
     if (set.fx_ok != FX_OK || set.rec_qt_ok != RQT_OK || set.dv_ok != DV_OK || set.m_ok != M_OK) {   /* (2.0 before its last additions) */
-        uint8_t keep[NTRK]; memcpy(keep, set.tprog, sizeof keep);
+        uint8_t keep[NTRK], keepb[NTRK], kb = set.tb_ok; memcpy(keep, set.tprog, sizeof keep); memcpy(keepb, set.tbank, sizeof keepb);
         if (set.rec_qt_ok != RQT_OK) { for (n = 0; n < NTRK; n++) set.rec_qt[n] = set.rec_q % NRQ; set.rec_qt_ok = RQT_OK; }
         if (set.dv_ok != DV_OK) { for (n = 0; n < NTRK; n++) set.mix_drv[n] = 0; set.dv_type = DV_OVERDRIVE; set.dv_amt = 60; set.dv_tone = 90; set.dv_mix = 127; set.dv_ok = DV_OK; }
         if (set.m_ok != M_OK) { set.m_vol = 100; set.m_dj = 64; set.m_drive = set.m_comp = 0; set.m_ok = M_OK; }
         if (set.fx_ok != FX_OK) settings_defaults();
-        memcpy(set.tprog, keep, sizeof keep);
+        memcpy(set.tprog, keep, sizeof keep); memcpy(set.tbank, keepb, sizeof keepb); set.tb_ok = kb;
+    }
+    if (set.tb_ok != TB_OK) {                   /* (0.41) the settings of before: a track's program was one number of 217 */
+        for (n = 0; n < NTRK; n++) { uint32_t g = prog_from_old(set.tprog[n], NTYPE); set.tprog[n] = (uint8_t)(g % NSLOT); set.tbank[n] = (uint8_t)(g / NSLOT); }
+        set.tb_ok = TB_OK; set.prog = set.tprog[0];
     }
     if (set.tempo < 40u || set.tempo > 240u) set.tempo = 120;
     if (set.midi_ch > 16u) set.midi_ch = 0;
@@ -98,10 +120,12 @@ static void store_boot(void)                    /* the settings and the programs
 
 static void store_poll(void)                    /* from the draw: what changed, once it has been quiet for a while */
 {
-    static const char *const PS[NPSECT] = {"plob0", "plob1", "plob2", "plob3"};
+    static const char *const PSO[NPSECT_OLD] = {"plob0", "plob1", "plob2", "plob3", "plob4"};
     uint32_t n;
     if ((!set_dirty && !ps_dirty) || (!store_force && o3_ms - store_t < 1500u)) return;
-    for (n = 0; n < NPSECT; n++) if (ps_dirty >> n & 1u) psect_save(PS[n], &psect[n]);
+    for (n = 0; n < NPSECT; n++) if (ps_dirty >> n & 1u) psect_save(ps_file(n), &psect[n]);
+    for (n = 0; n < NPSECT_OLD; n++) if (mig_del >> n & 1u) vibe_store_delete(PSO[n]);   /* (0.41: carried into the banks – written above) */
+    mig_del = 0;
     if (set_dirty) st_save("settings", &set, sizeof set);
     set_dirty = ps_dirty = 0;
 }
@@ -109,8 +133,13 @@ static void store_poll(void)                    /* from the draw: what changed, 
 static void prog_put(uint32_t n, const patch_t *p)   /* program n is the user's now */
 {
     n %= NPROG;
-    psect[n / PS_N].p[n % PS_N] = *p;
-    psect[n / PS_N].used[n % PS_N] = 1;
-    pk_valid = 0;                               /* (0.31) the slots' kinds: read again */
-    ps_dirty |= 1u << (n / PS_N); store_t = o3_ms;
+    psect[n / NSLOT].p[n % NSLOT] = *p;
+    psect[n / NSLOT].used[n % NSLOT] = 1;
+    ps_dirty |= 1u << (n / NSLOT); store_t = o3_ms;
+}
+static void prog_restore(uint32_t n)            /* (0.41) program n: the factory's again (the user's sound there is gone) */
+{
+    n %= NPROG;
+    psect[n / NSLOT].used[n % NSLOT] = 0;
+    ps_dirty |= 1u << (n / NSLOT); store_t = o3_ms;
 }

@@ -150,6 +150,7 @@ static void mo_all_off(uint32_t part)           /* a panic, a track's notes off:
  * A note remembers the channel it went out on (the channel turned while it sounds: its NOTE OFF still finds it). The
  * program and the four CCs go out when they change (a knob, automation, a sound loaded); the program also when the track
  * becomes MIDI or its channel changes. CCs are not sent on their own at the start – the device keeps its sound. */
+static uint32_t mt_sus;                         /* (22.11.) bit p: CC 64 sent down on track p's channel */
 static uint8_t mt_on[NPART][128];               /* the channel + 1 a note sounds on, 0: off */
 static uint8_t mt_sent[NPART][7];               /* [0] 1 = known · [1] channel · [2] program · [3..6] the CC values */
 static uint8_t mt_pg_want[NPART]; static uint32_t mt_pg_t[NPART];   /* a program being turned to: sent once it rests 1/4 s */
@@ -175,7 +176,11 @@ static void mt_block(void)
     for (uint32_t p = 0; p < NPART; p++) {
         const uint8_t *pv = pt[p].p->v;
         uint8_t *s = mt_sent[p];
-        if (part_type(p) != T_MIDI) { if (s[0]) { mt_all_off(p); s[0] = 0; } continue; }
+        if (part_type(p) != T_MIDI) { if (s[0]) { mt_all_off(p); s[0] = 0; } if (mt_sus >> p & 1u) { mt_sus &= ~(1u << p); mt_send(0xB0u | (pv[P_MI_CH] % 16u), 64, 0); } continue; }
+        {   /* (22.11.) the pedal, played or recorded: CC 64 (the synth out there holds its notes itself) */
+            uint32_t on = ((ctl_sus_live | seq_ped) >> p) & 1u;
+            if (on != (mt_sus >> p & 1u)) { mt_sus ^= 1u << p; mt_send(0xB0u | (pv[P_MI_CH] % 16u), 64, on ? 127u : 0u); }
+        }
         uint32_t ch = pv[P_MI_CH] % 16u, pg = pv[P_MI_PROG] % 129u;
         if (!s[0] || s[1] != ch) {              /* new as MIDI, or another channel: its program there */
             if (pg) mt_send(0xC0u | ch, pg - 1u, 0);
@@ -276,7 +281,7 @@ void vibe_on_init(float sr)
     engine_init();
     cc_map_init();
     store_boot();
-    for (t = 0; t < NTRK; t++) trk_load(t, set.tprog[t]);
+    for (t = 0; t < NTRK; t++) trk_load(t, (uint32_t)(set.tbank[t] % NBANK) * NSLOT + set.tprog[t] % NSLOT);
     mix_apply();
     daw_init(); daw_sync();                     /* (SDK 8) the DAW's parameters, at the sounds just loaded */
     daw_editor();                               /* (SDK 9) the Editor as OberVave wants it: cards, XY filter, curves */
@@ -284,7 +289,7 @@ void vibe_on_init(float sr)
     au_boot();                                  /* (3.7) the audio tracks: their settings, their takes from the card */
     scope_state = 1;
     splash_unpack();
-    vibe_log("BOOM 0.40 (native VIBE, 8 tracks, DX7, STRINGS and E-PIANO kinds, drum grid, delay and reverb modes, tube amp insert, own outputs, DAW mode)");
+    vibe_log("BOOM 0.41 (native VIBE, 8 tracks, DX7, STRINGS and E-PIANO kinds, drum grid, delay and reverb modes, tube amp insert, own outputs, DAW mode)");
 }
 
 static void leave_seq_edit(void) { step_held = -1; audition_off(); entry_reset(); }
@@ -405,6 +410,7 @@ static void button(int id, int down)
         if (id == VB_DATA_PUSH && in_seq() && SV_ENTRY(seq_view) && !menu && !f5_down && !au_is(sel)) { step_toggle(); break; }   /* (0.32) DATA: the cursor's step on / off */
         if (in_seq() && seq_view == SV_STEPS && !menu && !f5_down && !au_is(sel) && !drum_grid()) { roll_fold = !roll_fold; say(roll_fold ? "FOLD: ONLY THE NOTES USED" : "ALL KEYS"); break; }   /* (0.16) the piano roll: FOLD */   /* (3.7) TRACKS: SYNTH <-> AUDIO */
         if (f5_down) { randomize(); f5_used = 1; save_armed = 0; say("NEW SOUND"); }
+        else if (save_armed && id == VB_ENTER) save_restore();   /* (0.41) */
         else if (shift && page == PG_GLOBAL) reset_ask = 1;
         else if (page == PG_GLOBAL && !menu) {  /* SYNC: AUTO (a clock / the DAW leads when there is one) <-> INTERNAL */
             set.sync_int = !set.sync_int; set_touch();
@@ -412,8 +418,8 @@ static void button(int id, int down)
             say(set.sync_int ? "SYNC INTERNAL" : "SYNC AUTO");
         }
         break;
-    case VB_OCT_DOWN: oct_step(-1); break;
-    case VB_OCT_UP: oct_step(1); break;
+    case VB_OCT_DOWN: if (shift) prog_step(-1); else oct_step(-1); break;   /* (25.11.2026, Sven: the VIBE Box's − / + are OCT, */
+    case VB_OCT_UP: if (shift) prog_step(1); else oct_step(1); break;      /*  ◀ ▶ are gone there – SHIFT + − / +: the program) */
     case VB_PLAY: play_press(); break;
     case VB_STOP: if (ctl_seq_run) play_press(); break;
     default: break;
@@ -428,17 +434,17 @@ static void pad(uint32_t p, int down, float vel)
         if (pad_sent[p]) { note_in(0, pad_sent[p] - 1u, 0); pad_sent[p] = 0; }
         return;
     }
-    if (rec_down && p < 4u) { rec_armed_pads = 1; pad_sent[p] = 0; au_arm_toggle(bank0() + p); return; }   /* (0.29, Sven 15.11.) REC held + a pad of row 1:
+    if (rec_down && p < 8u && p < NTRK) { rec_armed_pads = 1; pad_sent[p] = 0; au_arm_toggle(p); return; }   /* (0.41: rows 1-2 = A-H, fixed) */   /* (0.29, Sven 15.11.) REC held + a pad of row 1:
                                                  * that track's ARM, on any page – and REC lets go without clearing anything */
     if (in_seq() && SV_ENTRY(seq_view) && !au_is(sel)) { step_pad_down(p, (uint32_t)(vel * 126.0f) + 1u); return; }
     if (in_seq() && SV_ENTRY(seq_view)) { if (p < 8u) perf_pad(p, shift); return; }   /* (an audio track in STEPS: rows 1-2 as in TRACKS) */   /* (an audio track: no steps – the rows as in TRACKS) */   /* STEPS: the 16 steps of the bar (a new one as hard as hit) */
     if (page == PG_MIXER) {                   /* row 1 start / stop – and that track is the chosen one at once (Sven 23.10.) */
-        if (p < 4u) { uint32_t w = bank0(), t = w + p; if (t != sel) { sel = t; step_held = -1; audition_off(); entry_reset(); } perf_pad_at(p, w, shift); }
+        if (p < 8u) { if (p < NTRK) { trk_select(p); if (rec) trk_record(p); else trk_launch(p); } }   /* (0.41) rows 1-2: A-D, E-H fixed – start / stop, chosen at once */
         else mixer_pad(p, shift);
         return;
     }
     /* (BOOM) TRACKS: rows 1-2 the four tracks in view, rows 3-4 play the chosen one – as the sound pages */
-    if (p < 8u) { perf_pad(p, shift); return; } /* row 1 start / stop (REC: record), row 2 the track */
+    if (p < 8u) { perf_pad(p, shift); return; } /* (0.41) rows 1-2: start / stop A-D, E-H (REC: record; SHIFT: choose) */
     if (!set.sc_pads && !drums_sel() && !smp_chop_sel()) { sc_stop(pad_ch[p]); sc_play(p - 8u, octave, (uint32_t)(vel * 126.0f) + 1u, pad_ch[p]); pad_sent[p] = pad_ch[p][0]; return; }   /* (3.10) the scale */
     pad_sent[p] = (uint8_t)(pad_note(p) + 1u);
     note_in(1, pad_sent[p] - 1u, (uint32_t)(vel * 126.0f) + 1u);
@@ -472,6 +478,8 @@ static void encoder(int id, float v)
             if (was != set.midi_out) { set_touch(); say(set.midi_out ? "MIDI OUT ON" : "MIDI OUT OFF"); if (!set.midi_out) { ctl_panic = 1; } }
         }
         else if (in_seq() && SV_ENTRY(seq_view) && !au_is(sel) && !shift) step_cursor_turn(s);   /* (0.32) STEPS: DATA moves the cursor */
+        else if (in_seq() && seq_view == SV_TRACK && !au_is(sel) && !pat.trk[sel].tm && pat.trk[sel].len && !shift)   /* (0.41) TRACK: DATA moves the edit line, a fast turn a bar */
+            step_cursor_turn(s > 1 || s < -1 ? (s > 0 ? 1 : -1) * (int32_t)seq_bar(sel) : s);
         else { int c = coarse(s); if (c) pat_go((uint32_t)(((int)(pat_queue ? pat_queue - 1u : set.pat) + c + (int)NPAT) % (int)NPAT)); }   /* the pattern, everywhere (6.11.2026) */
     }
 }
@@ -503,6 +511,16 @@ static void midi(uint32_t st, uint32_t d1, uint32_t d2)
     if (st == 0xFCu) { ctl_seq_run = 0; return; }
     if (st >= 0xF0u) return;
     if (kind == 0x90u && d2) midi_last_ch = (uint8_t)ch;
+    if (kind == 0xB0u && d1 == 64u) {           /* (22.11.2026) the sustain pedal: on the track this channel's notes go to (as below) */
+        uint32_t t, mc = midi_ch_eff(), on = d2 >= 64u;
+        for (t = 0; t < NTRK && set.trk_mch[t] != ch; t++) ;
+        if (t < NTRK) { ped_live(t, on, 0); return; }                               /* a track bound to the channel */
+        if (ch == 16u && mc != 16u && (!mc || mc + NTRK <= 16u)) return;            /* (channel 16: BOOM's controls) */
+        if (mc && ch >= mc && ch < mc + NTRK && ch - mc != sel) { ped_live(ch - mc, on, 0); return; }   /* a track's own channel */
+        if (mc && ch != mc + sel) return;
+        ped_live(sel, on, 1);                   /* the keys' way: the chosen track */
+        return;
+    }
     {   /* (0.24, Sven) a track bound to this channel (MIDI IN on the track's TYPE row) takes it – whichever track is chosen */
         static uint8_t bsent[NTRK][128];        /* the bound track's sounding notes (+1): their offs go there */
         uint32_t t;
@@ -518,7 +536,7 @@ static void midi(uint32_t st, uint32_t d1, uint32_t d2)
                 if (w == 2u && t == sel) note_in(0, d1, 0); else note_event_p(t, 0, d1, 0);
             }
             else if (kind == 0xE0u && t == sel) ctl_bend = (int32_t)(d1 | d2 << 7) - 8192;
-            else if (kind == 0xC0u && d1 < NPROG) { trk_load(t, d1); set_touch(); }
+            else if (kind == 0xC0u && d1 < NSLOT) { trk_load(t, bank_of(trk_type(t)) * NSLOT + d1); set_touch(); }   /* (0.41: 0-127 = the slots of the track's kind) */
             else if (kind == 0xB0u && cc_map[d1]) { uint32_t p = cc_map[d1] - 1u; if (!is_a_only(p)) live_p[t].v[p] = (uint8_t)(PDEF[p].max == 127 ? d2 : (d2 * PDEF[p].max + 63u) / 127u); }
             return;
         }
@@ -534,7 +552,7 @@ static void midi(uint32_t st, uint32_t d1, uint32_t d2)
         if (au_is(t) && (kind == 0x90u || kind == 0x80u)) return;   /* (3.7: an audio track plays no notes) */
         if (kind == 0x90u && d2) note_event_p(t, 1, d1, d2);
         else if (kind == 0x80u || kind == 0x90u) note_event_p(t, 0, d1, 0);
-        else if (kind == 0xC0u && d1 < NPROG) { trk_load(t, d1); set_touch(); }
+        else if (kind == 0xC0u && d1 < NSLOT) { trk_load(t, bank_of(trk_type(t)) * NSLOT + d1); set_touch(); }   /* (0.41: 0-127 = the slots of the track's kind) */
         else if (kind == 0xB0u && cc_map[d1]) { uint32_t p = cc_map[d1] - 1u; if (!is_a_only(p)) live_p[t].v[p] = (uint8_t)(PDEF[p].max == 127 ? d2 : (d2 * PDEF[p].max + 63u) / 127u); }
         return;
     }
@@ -546,10 +564,9 @@ static void midi(uint32_t st, uint32_t d1, uint32_t d2)
         midi_sent[d1 & 127u] = (uint8_t)(n + 1); note_in(1, (uint32_t)n, d2);
     } else if (kind == 0x80u || kind == 0x90u) { if (midi_sent[d1 & 127u]) { note_in(0, midi_sent[d1 & 127u] - 1u, 0); midi_sent[d1 & 127u] = 0; } }
     else if (kind == 0xE0u) ctl_bend = (int32_t)(d1 | d2 << 7) - 8192;
-    else if (kind == 0xC0u && d1 < NPROG) { trk_load(sel, d1); set_touch(); }
+    else if (kind == 0xC0u && d1 < NSLOT) { trk_load(sel, bank_of(trk_type(sel)) * NSLOT + d1); set_touch(); }
     else if (kind == 0xB0u) {
         if (d1 == 7u) ctl_cc7 = d2;
-        else if (d1 == 64u) ctl_sustain = d2 >= 64u;
         else if (d1 == 120u || d1 == 123u) ctl_panic = 1;
         else if (cc_map[d1]) { uint32_t p = cc_map[d1] - 1u; set_param(p, PDEF[p].max == 127 ? (int32_t)d2 : ((int32_t)d2 * PDEF[p].max + 63) / 127); auto_rec(p); }
     }
@@ -583,6 +600,52 @@ static void focus_items(void)                   /* (in the draw: where each one 
     }
     for (int i = 0; i < 6; i++) vf_key(VB_F1 + i, 40 + i * 80 - 37, 286, 74, 30);
 }
+/* (27.11., Sven: "im Mixer – FX / MASTER / EQ – da komm ich nicht drauf") a tap on the chips under the header (y 41-67, as
+ * mixer_view / group_chips / sound_chips draw them) opens that row / page – the iPad, the plugin, later a touch screen */
+static int chip_touch(int x, int y)
+{
+    if (menu) return 0;
+    if (y < 30 && x >= 166 && x < 166 + (int)NTRK * 11) { trk_select((uint32_t)(x - 166) / 11u); return 1; }   /* the header's A-H (track_letters 172, 11 apart) */
+    if (in_seq() && seq_view == SV_TRACKS && !files_on && y >= 72 && y < 72 + 4 * 32 && x >= CX0 && x < CX0 + CW - 14) {   /* TRACKS: a row = its track */
+        trk_select(bank0() + (uint32_t)(y - 72) / 32u); return 1;
+    }
+    if (y < 39 || y > 69 || x < CX0) return 0;
+    if (files_on) {                             /* LOAD / SAVE: the kinds (files_view) */
+        uint32_t i = (uint32_t)(x - CX0) / (uint32_t)((CW + 6) / NFK);
+        if (i < NFK) { files_kind(i); return 1; }
+        return 0;
+    }
+    if (in_seq()) {                             /* SEQUENCER / TRACKS: the views (view_tabs) */
+        static const uint8_t V[4] = {SV_TRACKS, SV_STEPS, SV_TRACK, SV_SLOTS};
+        uint32_t i = (uint32_t)(x - CX0) / COLW;
+        if (i < 4u) { seq_view = V[i]; return 1; }
+        return 0;
+    }
+    if (page == PG_MIXER) {
+        uint32_t i = (uint32_t)(x - CX0) / 51u;
+        if (i < NMROW) { mix_row = i; return 1; }
+        return 0;
+    }
+    if (page == PG_GLOBAL) return 0;
+    const group_t *g = page_group(page);
+    if (g->key == CK_SOUND || snd_view() || smp_page()) {   /* sound_chips: PERFORM, TYPE, the kind's pages; audio: AUDIO TAKE FILTER TYPE */
+        uint32_t au = AU.type >> sel & 1u, n = au ? 4u : snd_count() + 1u, i = (uint32_t)(x - CX0) / (uint32_t)((CW + 6) / (int)n);
+        if (i >= n) return 0;
+        if (au) { if (page_group(page)->key != CK_SOUND) go(PG_PERFORM); snd_x = i + 1u; }
+        else if (i == 1u) { go(PG_PERFORM); snd_x = SX_TYPE; }
+        else go(PG_PERFORM + (i ? i - 1u : 0u));
+        return 1;
+    }
+    {   /* group_chips: the colour key's pages (F6: GLOBAL, OUTPUT, SCALE) */
+        static const uint8_t F6P[3] = {PG_GLOBAL, PG_OUTPUT, PG_SCALE};
+        uint32_t n = g->key == 6 ? 3u : g->count, i;
+        if (n < 2) return 0;
+        i = (uint32_t)(x - CX0) / (uint32_t)((CW + 6) / (int)n);
+        if (i >= n) return 0;
+        go(g->key == 6 ? F6P[i] : g->first + i);
+        return 1;
+    }
+}
 void vibe_on_event(const vibe_event *e)
 {
     { int id = -1, r = vf_event(e, &id); if (r == VF_PRESS) focus_press(id); if (r != VF_NO) return; }
@@ -599,6 +662,7 @@ void vibe_on_event(const vibe_event *e)
         break; }
     case VIBE_EV_PAD: pad(e->id % VIBE_PADS, e->down, e->value); break;
     case VIBE_EV_TOUCH:                         /* (0.13, Sven: play the grid with the mouse; later a touch screen) a click into STEPS: that step on / off, as its pad */
+        if (e->id == VIBE_TOUCH_DOWN && chip_touch((int)((uint32_t)e->value & 511u), (int)((uint32_t)e->value >> 9))) break;
         if (e->id == VIBE_TOUCH_DOWN && in_seq() && seq_view == SV_STEPS && !au_is(sel) && pat.trk[sel].len) {
             int x = (int)((uint32_t)e->value & 511u), y = (int)((uint32_t)e->value >> 9), s = -1;
             if (drum_grid()) {                  /* the drum grid: the row is the drum (o3_seqview.h: X0 54, 26 wide, rows of 14 from 70) */
@@ -615,7 +679,7 @@ void vibe_on_event(const vibe_event *e)
     case VIBE_EV_ENCODER: encoder(e->id, e->value); break;
     case VIBE_EV_MIDI: midi(e->midi[0], e->midi[1], e->midi[2]); break;
     case VIBE_EV_PARAM: daw_from_host(e->id, e->value); break;   /* (SDK 8) the DAW's automation */
-    case VIBE_EV_PEDAL: if (e->id == VIBE_PEDAL_SWITCH) ctl_sustain = e->down; break;
+    case VIBE_EV_PEDAL: if (e->id == VIBE_PEDAL_SWITCH) ped_live(sel, e->down, 1); break;
     case VIBE_EV_SAVE:                          /* (SDK 21) the DAW saves its project / a preset: the sounds, patterns and
                                                    settings into the files now, not 1.5 s later (a Logic preset kept an older sound) */
         store_force = 1; seq_poll(); store_poll(); store_force = 0;
@@ -678,7 +742,7 @@ static void sound_tags(void)
 {
     const patch_t *pv = &live_p[sel];
     uint32_t ty = pv->v[P_TYPE] % NTYPE;
-    char b[64]; b[0] = 0;
+    char b[160]; b[0] = 0;                      /* (0.41: 64 was short – MIDI's line with ARP, HOLD and OCT ran over it) */
     if (page == PG_CHORUS || page == PG_DELAY || page == PG_REVERB || page == PG_DRIVE) {   /* (0.10) the effects: where their amount is set */
         const char *h = page == PG_DRIVE ? (set.dv_type % NDV == DV_AMP ? "INSERT · KNOB 4: THIS TRACK · ENCODER A: ANOTHER TRACK" : "SEND · MIXER > DRIVE: HOW MUCH PER TRACK")
                       : page == PG_DELAY ? "SEND · MIXER > DELAY: HOW MUCH PER TRACK" : page == PG_REVERB ? "SEND · MIXER > REVERB: HOW MUCH PER TRACK" : "SEND · MIXER > CHORUS: HOW MUCH PER TRACK";
@@ -699,7 +763,10 @@ static void sound_tags(void)
         if (sm_n[sel % NPART]) { scat(b, mode ? "" : "PLAY · "); if (mode) { fmt_u(b + slen(b), sm_n[sel % NPART]); scat(b, " SLICES · "); } scat(b, SMQ_NAME[pv->v[P_SM_QUAL] & 3u]); if (src) { scat(b, " · "); scat(b, SMTRK_NAME[src]); } }
         else scat(b, src ? "NO TAKE ON THAT TRACK" : "NO SAMPLE YET · REC RECORDS ONE");
     }
+    else if (ty == T_EP && pv->v[P_EP_CLAV]) { scat(b, "E-PIANO · CLAV · "); scat(b, CV_PU_NAME[pv->v[P_CV_PICKUP] % NCVPU]); if (pv->v[P_CV_WAH]) scat(b, " · WAH"); scat(b, " · POLY"); }   /* (0.41) */
     else if (ty == T_EP) { scat(b, pv->v[P_EP_MODEL] & 1u ? "E-PIANO · REED" : "E-PIANO · TINE"); if (pv->v[P_EP_TREM]) scat(b, pv->v[P_EP_STEREO] > 63u ? " · STEREO TREMOLO" : " · TREMOLO"); scat(b, " · "); scat(b, pv->v[P_MODE] == M_MONO ? "MONO" : "POLY"); }
+    else if (ty == T_GP) { scat(b, "GRAND PIANO · SAMPLED"); if (pv->v[P_GP_DECAY] < 127u) scat(b, " · SHORTER"); scat(b, " · POLY"); }   /* (0.41) */
+    else if (ty == T_WT) { scat(b, "WAVETABLE · "); scat(b, WT_NAME[pv->v[P_WT_TABLE] % NWT]); if (pv->v[P_WT_PENV] != 64u) scat(b, " · ENV>POS"); scat(b, " · "); scat(b, pv->v[P_MODE] == M_MONO ? "MONO" : "POLY"); }   /* (0.41) */
     else if (ty == T_STR) { scat(b, "STRING ENSEMBLE · "); scat(b, pv->v[P_ST_ENS] ? "ENSEMBLE ON" : "DRY"); scat(b, " · "); scat(b, pv->v[P_MODE] == M_MONO ? "MONO" : "POLY"); }
     else if (ty == T_SYNTH) { scat(b, "OBERVAVE · "); scat(b, MODE_NAME[pv->v[P_MODE] & 3u]); scat(b, " · "); scat(b, FTYPE_NAME[pv->v[P_FTYPE] % NFTYPE]); }
     else { scat(b, "FM 4-OP · ALGO "); fmt_u(b + slen(b), pv->v[P_ALGO] % NALGO + 1u); scat(b, " · "); scat(b, pv->v[P_MODE] == M_MONO ? "MONO" : "POLY"); }
@@ -762,18 +829,32 @@ static void save_banner(void)
     vg_text("SAVE HERE?", 240, 196, VG_MED, ACCENT, VG_CENTER);
     b[0] = 0; scat(b, TYPE_NAME[trk_type(sel)]); scat(b, " "); fmt_u(b + slen(b), prog_num(save_to)); scat(b, "  "); prog_name(save_to, n); scat(b, n);   /* (0.31: the kind's own numbers) */
     vg_text(b, 240, 218, VG_BIG, FG, VG_CENTER);
-    vg_text("DATA: another slot · F5 (TAP): save", 240, 252, VG_MED, DIM, VG_CENTER);
+    vg_text("DATA: slot · F5: save · ENTER: factory sound back", 240, 252, VG_MED, DIM, VG_CENTER);
+}
+static void trk_led(uint32_t t, int p)          /* (0.41, Sven: "nicht nur grün … sonst erkennt man die ja nicht") a track's pad keeps
+                                                 * ITS colour: stopped dim (the chosen one a bit brighter), playing it pulses with the
+                                                 * beat and flashes on each of its notes, NEXT / ENDS blink fast, recording: red and
+                                                 * its colour by turns */
+{
+    static uint32_t beat_seen, beat_t;
+    uint32_t s, c, len;
+    float b;
+    if (t >= NTRK) { vibe_led_pad(p, 0, 0); return; }
+    if (ui_seq_beat != beat_seen) { beat_seen = ui_seq_beat; beat_t = o3_ms; }
+    s = trk_state(t); c = TRK_RGB[t]; len = pat.trk[t].len;
+    if (s == 0u) { vibe_led_pad(p, c, t == sel ? 0.3f : 0.07f); return; }
+    if (s >= 2u) { vibe_led_pad(p, c, (o3_ms / 125u) & 1u ? 1.0f : 0.05f); return; }
+    b = o3_ms - beat_t < 120u ? 0.65f : 0.35f;  /* (the beat) */
+    if (!au_is(t) && len) {                     /* (its notes) */
+        const step_t *st = seq_step(t, ui_seq_pos[t] % len);
+        if (st->note[0] && !(st->ratch & STEP_OFF) && ui_seq_frac[t] < 160u) b = 1.0f;
+    }
+    if (rec && t == sel && (ui_seq_beat & 1u)) c = RED;
+    vibe_led_pad(p, c, b);
 }
 static void perf_leds(void)                     /* sound pages: row 1 start / stop (REC: red), row 2 the tracks, rows 3-4 notes */
 {
-    for (uint32_t c = 0; c < 4u; c++) {
-        uint32_t s = trk_state(c);
-        uint32_t t = col_trk(c);
-        if (t >= NTRK) { vibe_led_pad((int)c, 0, 0); vibe_led_pad((int)(4u + c), 0, 0); continue; }
-        s = trk_state(t);
-        vibe_led_pad((int)c, rec ? RED : GREEN, s == 1u ? 1.0f : s >= 2u ? (blink() ? 1.0f : 0.2f) : 0.12f);
-        vibe_led_pad((int)(4u + c), TRK_RGB[t], t == sel ? 1.0f : 0.25f);
-    }
+    for (uint32_t t = 0; t < 8u; t++) trk_led(t, (int)t);   /* (0.41) rows 1-2: A-H fixed */
     if (drums_sel()) for (int p = 8; p < 16; p++) { uint32_t d = PAD_DRUM[p - 8]; vibe_led_pad(p, DRUM_RGB[d], pad_sent[p] || ui_vlevel[card_lo(sel) + d] > 3000 ? 1.0f : 0.15f); }
     else for (int p = 8; p < 16; p++) vibe_led_pad(p, TRK_RGB[sel], pad_sent[p] ? 1.0f : 0.12f);
 }
@@ -849,6 +930,7 @@ void vibe_on_draw(uint16_t *fb)
         if (reset_ask) reset_view();
         toast_draw();
     }
+    seq_follow();                               /* (0.41) playing: STEPS' page follows the playhead, unless the edit line holds it */
     if (page == PG_MIXER) mixer_leds(); else if (in_seq()) seq_leds(); else perf_leds();
     for (int i = 0; i < 6; i++)                 /* (3.10) SHIFT held: the six keys of the scale in the track's colour, the key brighter */
         if (shift || k_lock || k_sent[i][0]) vibe_led_button(VB_K1 + i, TRK_RGB[sel], k_sent[i][0] ? 1.0f : i == 0 ? 0.55f : 0.25f);

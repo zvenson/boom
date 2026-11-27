@@ -71,6 +71,20 @@ static void tracks_view(void)                   /* the four in view one under th
         vg_rect(462, y0, 6, h, CELL); vg_rect(462, ty, 6, th, TRK_RGB[sel]);
     }
 }
+/* (0.41) the two lines over STEPS' grid and TRACK's time line: the PLAYHEAD white, running smoothly through the step; the
+ * EDIT line (the cursor) pink with a handle on top */
+static void play_line(int x, int y0, int h) { vg_rect(x - 1, y0, 2, h, 0xFFFFFF); }
+static void edit_line(int x, int y0, int h) { vg_rect(x - 1, y0, 2, h, ACCENT); vg_rect(x - 4, y0 - 3, 8, 3, ACCENT); }
+static int seq_playing(uint32_t t) { return ctl_seq_run && (ctl_trk_on >> t & 1u); }
+static uint32_t seq_fr(uint32_t t) { return ui_seq_frac[t] > 255u ? 255u : ui_seq_frac[t]; }
+static void grid_lines(uint32_t t, int X0, int CWD, int y0, int h)   /* the page's steps, CWD px each */
+{
+    uint32_t len = pat.trk[t].len, pw = seq_pw(t), pg = seq_pg[t], pos = len ? ui_seq_pos[t] % len : 0u, cur = len ? seq_cur[t] % len : 0u;
+    if (!len) return;
+    if (cur / pw == pg) edit_line(X0 + (int)(cur % pw) * CWD - 1, y0, h);
+    if (seq_playing(t) && pos / pw == pg) play_line(X0 + (int)(pos % pw) * CWD + (int)(seq_fr(t) * (uint32_t)CWD / 256u), y0, h);
+}
+static const char *follow_text(uint32_t t) { return !seq_playing(t) || seq_pages(t) < 2u ? "" : seq_hold >> t & 1u ? " \xc2\xb7 HOLD" : " \xc2\xb7 FOLLOW"; }
 /* (BOOM 0.5) the DRUM GRID: 8 rows (KICK .. PERC) x the 16 steps of the bar shown; a hit in the drum's colour, brighter the
  * harder; a roll as ticks; the chosen row framed, the cursor's column marked, the playhead white */
 static uint32_t roll_drum(uint32_t n) { for (uint32_t d = 0; d < NDRUM; d++) if (DRUM_NOTE[d] == n) return d; return drum_of_note(n); }
@@ -118,16 +132,15 @@ static void drum_grid_view(void)
                 vg_rect(x, y, CWD - 2, RH - 2, off ? CELL2 : vg_mix(BG, DRUM_RGB[d], 0.35f + 0.65f * (float)vl / 127.0f));
                 if (rn > 1u && !off) for (uint32_t r = 0; r < rn; r++) vg_rect(x + 2 + (int)(r * (uint32_t)(CWD - 6) / rn), y + RH - 6, 2, 3, 0xFFFFFF);
             }
-            if (ctl_seq_run && ctl_trk_on >> t & 1u && i == pos) vg_rect(x, y, CWD - 2, 2, 0xFFFFFF);
         }
         if (on) vg_frame(X0 - 2, y - 1, (int)pw * CWD + 2, RH, 1, DRUM_RGB[d]);
     }
-    {   /* the cursor's (or the held pad's) column */
-        uint32_t c = (step_held >= 0 ? (uint32_t)step_held : seq_cur[t] % len);
-        if (c / pw == pg) vg_frame(X0 + (int)(c % pw) * CWD - 1, Y0 - 2, CWD, (int)NDRUM * RH + 2, 1, step_held >= 0 ? ACCENT : FG);
-    }
+    if (step_held >= 0 && (uint32_t)step_held / pw == pg)   /* the held pad's column */
+        vg_frame(X0 + (int)((uint32_t)step_held % pw) * CWD - 1, Y0 - 2, CWD, (int)NDRUM * RH + 2, 1, ACCENT);
+    grid_lines(t, X0, CWD, Y0 - 2, (int)NDRUM * RH + 2);   /* (0.41) the edit line, the playhead */
     b[0] = 0; scat(b, "BAR "); fmt_u(b + slen(b), pg + 1u); scat(b, "/"); fmt_u(b + slen(b), seq_pages(t));
     if (ctl_seq_run && ctl_trk_on >> t & 1u && seq_pages(t) > 1u) { scat(b, " \xc2\xb7 PLAYS "); fmt_u(b + slen(b), pos / pw + 1u); }
+    scat(b, follow_text(t));
     vg_text(b, 470, 186, VG_MED, ctl_seq_run && pos / pw != pg ? ACCENT : DIM, VG_RIGHT);
     if (rec) vg_text(rec == REC_ON ? "\xe2\x97\x8f REC" : "REC ARMED", CX0, 186, VG_MED, RED, VG_LEFT);
     else vg_text(seq_shift ? "SHIFT: RATCHET \xc2\xb7 CHANCE \xc2\xb7 ON/OFF" : "DATA: STEP \xc2\xb7 PUSH: ON/OFF \xc2\xb7 PADS TOO", CX0, 186, VG_MED, MUTED, VG_LEFT);
@@ -177,12 +190,13 @@ static void steps_view(void)                    /* the cursor's bar: a kit's dru
         for (uint32_t q = 0; q < SEQ_CHORD && st->note[q]; q++) { if (st->note[q] > rows[0]) up = 1; if (st->note[q] < rows[nr - 1u]) dn = 1; }
         if (up) vg_rect(x + 8, Y0 - 3, 8, 2, c);
         if (dn) vg_rect(x + 8, Y0 + (int)nr * RH, 8, 2, c);
-        if (ctl_seq_run && ctl_trk_on >> t & 1u && i == pos) vg_rect(x, Y0 - 1, CWD - 2, 2, 0xFFFFFF);
-        if (i == seq_cur[t] % len || (int32_t)i == step_held) vg_frame(x - 1, Y0 - 1, CWD, (int)nr * RH + 1, 1, (int32_t)i == step_held ? ACCENT : FG);
+        if ((int32_t)i == step_held) vg_frame(x - 1, Y0 - 1, CWD, (int)nr * RH + 1, 1, ACCENT);
     }
+    grid_lines(t, X0, CWD, Y0 - 1, (int)nr * RH + 1);   /* (0.41) the edit line, the playhead */
     b[0] = 0; scat(b, "BAR "); fmt_u(b + slen(b), pg + 1u); scat(b, "/"); fmt_u(b + slen(b), seq_pages(t));
     if (ctl_seq_run && ctl_trk_on >> t & 1u && seq_pages(t) > 1u) { scat(b, " · PLAYS "); fmt_u(b + slen(b), pos / pw + 1u); }
     if (meter_of(t)) { scat(b, " · "); scat(b, METER[meter_of(t)].name); }
+    scat(b, follow_text(t));
     vg_text(b, 470, 186, VG_MED, ctl_seq_run && pos / pw != pg ? ACCENT : DIM, VG_RIGHT);
     if (rec) vg_text(rec == REC_ON ? "● REC" : "REC ARMED", CX0, 186, VG_MED, RED, VG_LEFT);
     else vg_text(seq_shift ? "SHIFT: RATCHET · CHANCE · ON/OFF" : roll_fold ? "FOLD: ONLY THE NOTES USED · ENTER: ALL KEYS" : "DATA: STEP · PUSH: ON/OFF · ENTER: FOLD", CX0, 186, VG_MED, MUTED, VG_LEFT);
@@ -239,13 +253,15 @@ static void tm_view(uint32_t t)                 /* (0.32) TRACK: the track as a 
                 vg_rect(x, y - 2, w, 5, (st->ratch & STEP_OFF) || (!grow && (f < ts || f >= te)) ? MUTED : vg_mix(BG, nc, 0.45f + 0.55f * (float)vl / 127.0f));   /* (outside the loop / OFF: not played; brighter the harder) */
             }
         }
-        if (run && head < span) vg_rect(CX0 + (int)((uint64_t)head * CW / span), 72, 2, 108, FG);
+        if (!tm && k->len) edit_line(CX0 + (int)((uint64_t)(seq_cur[t] % k->len) * TM_FINE * CW / span), 75, 105);   /* (0.41) the edit line */
+        if (run && head < span) play_line(CX0 + (int)((uint64_t)head * CW / span) + 1, 72, 108);
     }
     b[0] = 0;
     if (!tm) {
         uint32_t len = k->len, bs = seq_bar(t);
         fmt_u(b, len); scat(b, " steps · "); fmt_u(b + slen(b), (len + bs - 1u) / bs); scat(b, (len + bs - 1u) / bs == 1u ? " bar · " : " bars · ");
         scat(b, METER[meter_of(t)].name);
+        scat(b, " · EDIT "); fmt_u(b + slen(b), seq_cur[t] % len + 1u); scat(b, " (DATA)");
         vg_text(b, CX0, 186, VG_MED, DIM, VG_LEFT);
         return;
     }

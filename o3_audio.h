@@ -652,7 +652,7 @@ static int au_knobs(knob_t *k)
     for (int i = 0; i < 4; i++) {
         char *v = k[i].value; v[0] = 0; k[i].bip = 0; k[i].v = 0; k[i].label = L[a[i]];
         switch (a[i]) {
-        case AK_TYPE: scat(v, AU.type >> t & 1u ? "AUDIO" : TYPE_NAME[trk_type(t)]); k[i].v = AU.type >> t & 1u ? 1.0f : (float)trk_type(t) / (float)NTYPE; break;
+        case AK_TYPE: scat(v, AU.type >> t & 1u ? "AUDIO" : TYPE_NAME[trk_type(t)]); k[i].v = AU.type >> t & 1u ? 1.0f : (float)(type_pos(trk_type(t)) < 0 ? 2 : type_pos(trk_type(t))) / (float)NTYPE_ORDER; break;
         case AK_CH: scat(v, au_stt(t) ? "STEREO" : "MONO"); k[i].v = au_stt(t) ? 1.0f : 0.0f; break;
         case AK_INM: if (au_src_in(AU.src[t]) < 0 || au_src_in(AU.src[t]) > 1) scat(v, "--");   /* (0.29: an interface's IN 3.. has its own preamps) */
                      else { uint32_t n = AU.src[t] == AU_IN2 ? 1u : 0u; scat(v, INM_NAME[set.au_inm[n] % 3u]); k[i].v = (float)(set.au_inm[n] % 3u) / 2.0f; }
@@ -707,12 +707,15 @@ static int au_turn(uint32_t knob, int32_t e)
     if (au_lay < 0 && !au_plus() && !au_here()) return 0;
     au_layout(a);
     switch (a[knob & 3u]) {
-    case AK_TYPE: {                             /* DRUMS → BASS → MEL → … → MIDI → E-PIANO → AUDIO */
-        int au = (int)(AU.type >> t & 1u); int32_t cur = au ? (int32_t)NTYPE : (int32_t)trk_type(t), nx = clampi(cur + sg, 0, (int32_t)NTYPE);
-        if (nx == cur) return 1;
-        if (nx == (int32_t)NTYPE) { au_type_toggle(t); return 1; }
+    case AK_TYPE: {                             /* (0.41) TYPE_ORDER: DRUMS → BASS → OBERVAVE → DX → WAVETABLE → … → MIDI → AUDIO (MEL no more) */
+        int au = (int)(AU.type >> t & 1u); int32_t cur = au ? (int32_t)NTYPE_ORDER : type_pos(trk_type(t)), nx;
+        if (cur < 0) cur = type_pos(T_SYNTH) - (sg < 0 ? 0 : 1);   /* (an older MEL track: it sat between BASS and OBERVAVE) */
+        nx = clampi(cur + sg, 0, (int32_t)NTYPE_ORDER);
+        if (nx == cur && !(cur >= 0 && !au && trk_type(t) == T_MEL)) return 1;
+        if (nx == (int32_t)NTYPE_ORDER) { au_type_toggle(t); return 1; }
         if (au) au_type_toggle(t);
-        trk_set_type(t, (uint32_t)nx); set_touch(); say_trk(nx == T_DRUMS ? ": DRUMS" : nx == T_BASS ? ": BASS (808)" : nx == T_MEL ? ": MEL (FM)" : nx == T_SYNTH ? ": OBERVAVE" : nx == T_DX ? ": DX" : nx == T_STR ? ": STRINGS" : nx == T_SMP ? ": SAMPLER" : nx == T_EP ? ": E-PIANO" : ": MIDI – ONLY OUT, CH ON THE MIDI PAGE", t);
+        { uint32_t ty = TYPE_ORDER[nx];
+          trk_set_type(t, ty); set_touch(); say_trk(ty == T_DRUMS ? ": DRUMS" : ty == T_BASS ? ": BASS (808)" : ty == T_SYNTH ? ": OBERVAVE" : ty == T_DX ? ": DX" : ty == T_WT ? ": WAVETABLE" : ty == T_GP ? ": PIANO" : ty == T_STR ? ": STRINGS" : ty == T_SMP ? ": SAMPLER" : ty == T_EP ? ": E-PIANO" : ": MIDI – ONLY OUT, CH ON THE MIDI PAGE", t); }
         return 1; }
     case AK_PLAYS: if (AU.type >> t & 1u) return 1;
         set.trk_daw = (uint8_t)(e > 0 ? set.trk_daw | 1u << t : set.trk_daw & ~(1u << t)); mix_apply(); set_touch();
@@ -976,13 +979,16 @@ static void snd_under(uint32_t sx)              /* below the knobs: the take, or
     if (sx == SX_TYPE) {
         static const char *const TT[NTYPE] = {"DRUMS: a kit of 8 synth drums – the pads and the keys play them.",
                                               "BASS: the 808 – played like a bass over the keys, mono, with slides.",
-                                              "MEL: 4-operator FM – bells, plucks, keys, pads (8 voices).",
+                                              "MEL: 4-operator FM (an older project's) – its sounds are DX's first 16 now.",
                                               "OBERVAVE: the analog poly – its 64 sounds and pages (8 voices).",
-                                              "DX: a DX7 voice – 6 operators, 32 algorithms, 4 macros; LOAD takes .syx banks.",
+                                              "DX: a DX7 voice – 6 operators, 32 algorithms, 4 macros, OP pages; LOAD takes .syx banks.",
                                               "STRINGS: a string ensemble – 16', 8', 4' registers and the ensemble (8 voices).",
                                               "SAMPLER: its own sample (REC on it, or LOAD) – PLAY it over the keys, or CHOP it.",
                                               "MIDI: silent here – its notes, program and 4 CCs go out to a device on its channel.",
-                                              "E-PIANO: tines or reeds, a pickup that barks, the tremolo (8 voices)."};
+                                              "E-PIANO: tines, reeds or a CLAV (MODEL) – the pickup, tremolo / wah (8 voices).",
+                                              "WAVETABLE: 8 tables, POSITION moves through them – 2 oscillators + sub.",
+                                              "PIANO: a sampled concert grand – the touch picks the recording (8 voices).",
+                                              "CLAV: (inside E-PIANO now – MODEL CLAV)."};
         vg_text(AU.type >> t & 1u ? "AUDIO: the track plays what was recorded or loaded onto it." : TT[trk_type(t)], 240, 214, VG_MED, DIM, VG_CENTER);
         vg_text("KNOB 1: the kind – in this pattern · a new kind loads its first sound", 240, 236, VG_MED, MUTED, VG_CENTER);
         vg_text("PLAYS: SEQ / DAW · OUT: own output · MIDI IN: CH n = always that channel", 240, 256, VG_SMALL, MUTED, VG_CENTER);

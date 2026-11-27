@@ -14,7 +14,7 @@
 #define BMF_VER 1u
 static uint32_t bmf_head(uint8_t *b, char kind, uint32_t x)
 {
-    b[0] = 'B'; b[1] = 'M'; b[2] = 'F'; b[3] = (uint8_t)kind; b[4] = kind == 'P' || kind == 'S' ? 2u : BMF_VER;   /* ('P' 2: each note's velocity and roll · 'S' 2: each sound's DX voice) */ b[5] = (uint8_t)NTRK; b[6] = (uint8_t)NPARAM; b[7] = (uint8_t)x;
+    b[0] = 'B'; b[1] = 'M'; b[2] = 'F'; b[3] = (uint8_t)kind; b[4] = kind == 'S' ? 3u : kind == 'P' ? 2u : BMF_VER;   /* ('P' 2: each note's velocity and roll · 'S' 2: each sound's DX voice, 3 (0.41): a sound's program is its slot in its kind's bank) */ b[5] = (uint8_t)NTRK; b[6] = (uint8_t)NPARAM; b[7] = (uint8_t)x;
     return 8u;
 }
 static int bmf_is(const uint8_t *b, uint32_t len, char kind) { return len >= 8u && b[0] == 'B' && b[1] == 'M' && b[2] == 'F' && b[3] == (uint8_t)kind && b[4] >= 1u; }
@@ -33,7 +33,7 @@ static void bmf_patch_in(const uint8_t *b, uint32_t np, patch_t *p, int dx)   /*
 static uint32_t psnd_ser(const psnd_t *s, uint8_t *b)
 {
     uint32_t at = bmf_head(b, 'S', NFXP);
-    for (uint32_t t = 0; t < NTRK; t++) { b[at++] = s->prog[t]; b[at++] = s->edited[t]; bmf_patch_out(b + at, &s->p[t]); at += NPARAM + PATCH_NAME + DX_VOICE; }
+    for (uint32_t t = 0; t < NTRK; t++) { b[at++] = (uint8_t)(s->prog[t] % NSLOT); b[at++] = s->edited[t]; bmf_patch_out(b + at, &s->p[t]); at += NPARAM + PATCH_NAME + DX_VOICE; }
     for (uint32_t t = 0; t < NTRK; t++) { b[at++] = s->mx.lvl[t]; b[at++] = s->mx.cho[t]; b[at++] = s->mx.dly[t]; b[at++] = s->mx.rev[t]; b[at++] = s->mx.drv[t]; b[at++] = (uint8_t)s->mx.pan[t]; }
     memcpy(b + at, s->mx.fx, NFXP); at += NFXP;
     b[at++] = BMF_NSCAL;
@@ -51,12 +51,16 @@ static int psnd_des(const uint8_t *b, uint32_t len, psnd_t *s)   /* 0: read (thi
     /* (0.3's raw struct: no longer read – every file was written anew by 0.4) */
     if (!bmf_is(b, len, 'S')) return -1;
     {
-        uint32_t nt = b[5], np = b[6], nfx = b[7], at = 8u, v2 = b[4] >= 2u, rec = 2u + np + PATCH_NAME + (v2 ? DX_VOICE : 0u), ns;
+        uint32_t nt = b[5], np = b[6], nfx = b[7], at = 8u, v2 = b[4] >= 2u, v3 = b[4] >= 3u, rec = 2u + np + PATCH_NAME + (v2 ? DX_VOICE : 0u), ns;
         if (len < at + nt * rec + nt * 6u + nfx + 1u) return -1;
         memset(s, 0, sizeof *s); s->magic = PSN2_MAGIC;
         mx_from_set(&s->mx);                    /* (what the file does not say: as it is now) */
         for (uint32_t t = 0; t < NTRK; t++) {
-            if (t < nt) { const uint8_t *r = b + at + t * rec; s->prog[t] = (uint8_t)(r[0] % NPROG); s->edited[t] = r[1]; bmf_patch_in(r + 2, np, &s->p[t], (int)v2); }
+            if (t < nt) {                       /* (0.41: the program – v3: its slot in the sound's kind; before: one number of 217) */
+                const uint8_t *r = b + at + t * rec; uint32_t ty;
+                s->edited[t] = r[1]; bmf_patch_in(r + 2, np, &s->p[t], (int)v2); ty = s->p[t].v[P_TYPE] % NTYPE;
+                s->prog[t] = (uint16_t)(v3 ? bank_of(ty) * NSLOT + r[0] % NSLOT : prog_from_old(r[0], ty));
+            }
             else { prog_get(TPROG_DEF[t], &s->p[t]); s->prog[t] = TPROG_DEF[t]; }   /* (a track the file has not: its factory sound) */
         }
         at += nt * rec;
@@ -100,6 +104,10 @@ static uint32_t pat_ser(const pattern_t *p, uint8_t *b)
         }
         for (uint32_t l = 0; l < NLANE; l++) { b[at++] = p->lane[t][l].param; memcpy(b + at, p->lane[t][l].v, SEQ_STEPS); at += SEQ_STEPS; }
     }
+    /* (22.11.2026) behind the tracks: 'D', tracks, steps (2 bytes), then per track and step its two pedal changes – a
+     * firmware from before reads up to the tracks and passes it over */
+    b[at++] = 'D'; b[at++] = (uint8_t)NTRK; b[at++] = (uint8_t)(SEQ_STEPS & 255u); b[at++] = (uint8_t)(SEQ_STEPS >> 8);
+    memcpy(b + at, p->ped, sizeof p->ped); at += sizeof p->ped;
     return at;
 }
 static int pat_des(const uint8_t *b, uint32_t len, pattern_t *p)
@@ -129,7 +137,17 @@ static int pat_des(const uint8_t *b, uint32_t len, pattern_t *p)
                 memcpy(p->lane[t][l].v, q + 1, ns < SEQ_STEPS ? ns : SEQ_STEPS);
             }
         }
-        p->magic = PAT_MAGIC; p->auto_magic = AUTO_MAGIC;
+        {   /* (22.11.) the pedal, when the file has it (pat_init: none) */
+            uint32_t e = at + nt * per;
+            if (len >= e + 4u && b[e] == 'D') {
+                uint32_t pt_ = b[e + 1], ps = b[e + 2] | (uint32_t)b[e + 3] << 8;
+                e += 4u;
+                if (len >= e + pt_ * ps * 2u)
+                    for (uint32_t t = 0; t < pt_ && t < NTRK; t++) for (uint32_t i = 0; i < ps && i < SEQ_STEPS; i++)
+                        for (uint32_t j = 0; j < 2u; j++) { uint8_t v = b[e + (t * ps + i) * 2u + j]; p->ped[t][i][j] = v; }
+            }
+        }
+        p->magic = PAT_MAGIC; p->auto_magic = AUTO_MAGIC; p->ped_magic = PED_MAGIC;
     }
     return 0;
 }

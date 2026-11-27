@@ -361,6 +361,47 @@ static const factory_t FACT_EP[] = {{"STAGE TINE", PE_STAGE}, {"SUITCASE", PE_SU
                                     {"BELL TINE", PE_BELL}, {"REED", PE_REED}, {"REED TREM", PE_RTREM}, {"DIRTY REED", PE_DIRTY}};
 #define NFACT_EP (sizeof FACT_EP / sizeof FACT_EP[0])
 #undef EP
+/* (0.41) WAVETABLE: slots 201-208 – the table, POSITION, its envelope (amount, attack, decay), the LFO on it, oscillator 2
+ * (level, interval 12 = unison, detune), the sub. Every knob set: they sit on MEL's bytes, whose defaults mean something else */
+#define WT(tb, pos, penv, pa, pd, lfo, o2, semi, det, sub) P_TYPE, T_WT, P_WT_TABLE, tb, P_WT_POS, pos, P_WT_PENV, penv, P_WT_PATT, pa, \
+    P_WT_PDEC, pd, P_WT_LFO, lfo, P_WT_O2, o2, P_WT_SEMI, semi, P_WT_DET, det, P_WT_SUB, sub
+static const uint8_t PW_GLASS[] = {WT(7, 30, 92, 90, 127, 30, 100, 12, 40, 0), P_AA, 70, P_AD, 100, P_AS, 127, P_AR, 95, P_CUTOFF, 112, P_RESO, 10, P_LFO_RATE, 50, P_CHO_MIX, 40, P_REV_MIX, 50, P_REV_SIZE, 112, X};
+static const uint8_t PW_VOX[] = {WT(2, 0, 127, 10, 100, 0, 70, 12, 20, 0), P_AA, 20, P_AD, 100, P_AS, 110, P_AR, 80, P_CUTOFF, 120, P_REV_MIX, 35, X};
+static const uint8_t PW_SYNC[] = {WT(4, 40, 104, 0, 72, 0, 0, 12, 0, 60), P_MODE, M_MONO, P_GLIDE, 20, P_AA, 0, P_AD, 90, P_AS, 110, P_AR, 40, P_CUTOFF, 110, P_DLY_MIX, 30, X};
+static const uint8_t PW_FOLD[] = {WT(5, 20, 100, 0, 60, 0, 0, 12, 0, 90), P_MODE, M_MONO, P_GLIDE, 15, P_AA, 0, P_AD, 80, P_AS, 80, P_AR, 30, P_CUTOFF, 92, P_RESO, 20, X};
+static const uint8_t PW_PWM[] = {WT(1, 40, 64, 0, 127, 50, 110, 12, 60, 0), P_AA, 60, P_AD, 100, P_AS, 120, P_AR, 90, P_LFO_RATE, 60, P_CUTOFF, 104, P_CHO_MIX, 50, P_REV_MIX, 40, X};
+static const uint8_t PW_ORGAN[] = {WT(3, 90, 64, 0, 127, 0, 0, 12, 0, 40), P_AA, 2, P_AD, 90, P_AS, 127, P_AR, 20, P_CUTOFF, 127, X};
+static const uint8_t PW_BELL[] = {WT(6, 20, 110, 0, 85, 0, 60, 12, 10, 0), P_AA, 0, P_AD, 100, P_AS, 30, P_AR, 70, P_REV_MIX, 40, P_REV_SIZE, 105, X};
+static const uint8_t PW_BRASS[] = {WT(0, 70, 90, 25, 80, 0, 100, 12, 30, 0), P_AA, 15, P_AD, 90, P_AS, 90, P_AR, 50, P_CUTOFF, 95, P_FENV_AMT, 90, P_FA, 20, P_FD, 80, P_FS, 50, X};
+static const factory_t FACT_WT[] = {{"GLASS PAD", PW_GLASS}, {"VOX SWEEP", PW_VOX}, {"SYNC LEAD", PW_SYNC}, {"FOLD BASS", PW_FOLD},
+                                   {"PWM STRING", PW_PWM}, {"DRAWBARS", PW_ORGAN}, {"BELL KEYS", PW_BELL}, {"WAVE BRASS", PW_BRASS}};
+#define NFACT_WT (sizeof FACT_WT / sizeof FACT_WT[0])
+#undef WT
+/* (0.41) PIANO: slot 209 – the sampled grand: TONE (64 = as recorded), HAMMER (64 = the touch as played), DECAY,
+ * VELO (the touch on the level), SPREAD (the keys across the stereo picture); DAMPER = the release */
+#define GP(tone, ham, dec, velo, spr, dmp) P_TYPE, T_GP, P_GP_TONE, tone, P_GP_HAMMER, ham, P_GP_DECAY, dec, P_GP_VELO, velo, \
+    P_GP_SPREAD, spr, P_AR, dmp, P_AA, 0, P_CUTOFF, 127, P_RESO, 0, P_FENV_AMT, 64, P_MODE, M_POLY, P_GLIDE, 0
+static const uint8_t PG_GRAND[] = {GP(64, 64, 127, 35, 100, 52), X};   /* (22.11.: Sven's own recording keeps the played dynamics, ~22 dB: VELO 35 adds a little; 0.41, Sven: "1 besserer Piano Sound genügt") dry: the room is the mixer's */
+static const factory_t FACT_GP[] = {{"GRAND", PG_GRAND}};
+#define NFACT_GP (sizeof FACT_GP / sizeof FACT_GP[0])
+#undef GP
+/* (0.41) E-PIANO's CLAV model: slots 210-217 – PICKUP (0 NECK 1 BRIDGE 2 BOTH 3 OUT), TONE, MUTE, DECAY, the envelope filter (WAH, its
+ * resonance, its speed), CLICK, VELO */
+#define CV(pu, tone, mute, dec, wah, wres, wspd, click) P_TYPE, T_EP, P_EP_CLAV, 1, P_EP_MODEL, 0, P_CV_PICKUP, pu, P_CV_TONE, tone, P_CV_MUTE, mute, P_CV_DECAY, dec, \
+    P_CV_WAH, wah, P_CV_WRES, wres, P_CV_WSPD, wspd, P_CV_CLICK, click, P_CV_VELO, 90, \
+    P_AA, 0, P_AR, 30, P_CUTOFF, 127, P_RESO, 0, P_FENV_AMT, 64, P_MODE, M_POLY, P_GLIDE, 0
+static const uint8_t PC_FUNK[] = {CV(2, 80, 30, 70, 0, 40, 60, 60), X};
+static const uint8_t PC_WAH[] = {CV(1, 84, 24, 72, 96, 90, 64, 56), P_VOLUME, 90, X};
+static const uint8_t PC_MUTED[] = {CV(2, 66, 104, 50, 0, 40, 60, 70), X};
+static const uint8_t PC_BRIGHT[] = {CV(1, 110, 20, 76, 0, 40, 60, 54), X};
+static const uint8_t PC_NECK[] = {CV(0, 56, 30, 80, 0, 40, 60, 44), X};
+static const uint8_t PC_THIN[] = {CV(3, 90, 26, 72, 30, 70, 50, 56), P_VOLUME, 127, X};
+static const uint8_t PC_SLAP[] = {CV(2, 96, 60, 60, 60, 110, 90, 90), P_VOLUME, 112, X};
+static const uint8_t PC_SOFT[] = {CV(0, 40, 50, 84, 0, 40, 60, 30), P_CUTOFF, 112, X};
+static const factory_t FACT_CV[] = {{"FUNK CLAV", PC_FUNK}, {"WAH CLAV", PC_WAH}, {"MUTED CLAV", PC_MUTED}, {"HARD CLAV", PC_BRIGHT},
+                                   {"NECK CLAV", PC_NECK}, {"THIN CLAV", PC_THIN}, {"SLAP CLAV", PC_SLAP}, {"SOFT CLAV", PC_SOFT}};
+#define NFACT_CV (sizeof FACT_CV / sizeof FACT_CV[0])
+#undef CV
 #undef MI
 #undef SM
 #undef ST
@@ -368,16 +409,200 @@ static const factory_t FACT_EP[] = {{"STAGE TINE", PE_STAGE}, {"SUITCASE", PE_SU
 #define NFACT_DRUMS (sizeof FACT_DRUMS / sizeof FACT_DRUMS[0])
 #define NFACT_BASS (sizeof FACT_BASS / sizeof FACT_BASS[0])
 #define NFACT_MEL (sizeof FACT_MEL / sizeof FACT_MEL[0])
-static const factory_t *factory_of(uint32_t n)  /* slot n's factory sound */
+#define X 255
+#define EP2(m, tone, bark, bell, dec) P_TYPE, T_EP, P_EP_MODEL, m, P_EP_TONE, tone, P_EP_BARK, bark, P_EP_BELL, bell, P_EP_DECAY, dec, \
+    P_EP_TREM, 0, P_EP_RATE, 50, P_EP_STEREO, 127, P_EP_DRIVE, 0, P_EP_NOISE, 40, P_EP_VELO, 90, \
+    P_AA, 0, P_AR, 64, P_CUTOFF, 127, P_RESO, 0, P_FENV_AMT, 64, P_MODE, M_POLY, P_GLIDE, 0
+#define CV2(pu, tone, mute, dec, wah, wres, wspd, click) P_TYPE, T_EP, P_EP_CLAV, 1, P_EP_MODEL, 0, P_CV_PICKUP, pu, P_CV_TONE, tone, P_CV_MUTE, mute, P_CV_DECAY, dec, \
+    P_CV_WAH, wah, P_CV_WRES, wres, P_CV_WSPD, wspd, P_CV_CLICK, click, P_CV_VELO, 90, \
+    P_AA, 0, P_AR, 30, P_CUTOFF, 127, P_RESO, 0, P_FENV_AMT, 64, P_MODE, M_POLY, P_GLIDE, 0
+#define MI2(ch) P_TYPE, T_MIDI, P_MI_CH, ch, P_MI_PROG, 0, P_MI_VEL, 0, P_MI_CC1N, 74, P_MI_CC2N, 71, P_MI_CC3N, 73, P_MI_CC4N, 1, P_MI_CC1, 64, P_MI_CC2, 0, P_MI_CC3, 0, P_MI_CC4, 0, P_MODE, M_POLY
+/* ==== (0.41, Sven 21.11.: "noch einige weitere schöne Presets pro Stimme – tolles, gewohntes klassisches, modernes") ====
+ * more factory sounds per kind, after the ones before (their slots unchanged). Dry: the song's effects are the mixer's. */
+#define K(kt, kp, kd, kdr, st, sto, sd, ss, cs, ct, cd, ht, hto, chd, ohd) P_TYPE, T_DRUMS, P_K_TUNE, kt, P_K_PUNCH, kp, P_K_DECAY, kd, P_K_DRIVE, kdr, \
+    P_S_TUNE, st, P_S_TONE, sto, P_S_DECAY, sd, P_S_SNAP, ss, P_C_SPREAD, cs, P_C_TONE, ct, P_C_DECAY, cd, P_H_TUNE, ht, P_H_TONE, hto, P_CH_DECAY, chd, P_OH_DECAY, ohd
+static const uint8_t PK2_HOUSE[] = {K(55, 70, 70, 15, 66, 70, 40, 80, 60, 70, 60, 75, 90, 20, 70), P_VOLUME, 92, X};
+static const uint8_t PK2_TECHNO[] = {K(48, 90, 75, 55, 58, 60, 35, 70, 55, 55, 55, 80, 95, 15, 55), P_CUTOFF, 115, P_VOLUME, 93, X};
+static const uint8_t PK2_ELECTRO[] = {K(62, 100, 50, 20, 85, 95, 30, 105, 45, 85, 40, 95, 110, 12, 40), P_VOLUME, 103, X};
+static const uint8_t PK2_MINIMAL[] = {K(58, 75, 45, 10, 70, 60, 25, 60, 35, 70, 30, 85, 100, 10, 30), P_P_TUNE, 70, P_P_DECAY, 30, P_VOLUME, 108, X};
+static const uint8_t PK2_DUB[] = {K(42, 60, 95, 25, 50, 45, 70, 55, 70, 45, 80, 55, 60, 30, 85), P_CUTOFF, 96, P_VOLUME, 83, X};
+static const uint8_t PK2_INDUS[] = {K(50, 95, 65, 110, 60, 100, 55, 110, 50, 90, 55, 95, 115, 35, 80), P_C_DRIVE, 90, P_CUTOFF, 120, P_VOLUME, 104, X};
+static const uint8_t PK2_SOFT[] = {K(60, 45, 50, 0, 58, 45, 40, 40, 40, 45, 45, 55, 55, 25, 50), P_CUTOFF, 104, P_VOLUME, 106, X};
+static const uint8_t PK2_PHONK[] = {K(46, 90, 100, 70, 70, 85, 45, 100, 30, 95, 40, 90, 110, 14, 45), P_P_TUNE, 90, P_VOLUME, 85, X};
+static const uint8_t PK2_2STEP[] = {K(60, 85, 48, 20, 78, 85, 30, 95, 40, 90, 35, 88, 100, 16, 50), P_R_TUNE, 80, P_VOLUME, 104, X};
+static const uint8_t PK2_DISCO[] = {K(58, 65, 60, 10, 62, 70, 55, 70, 70, 60, 70, 70, 80, 26, 85), P_VOLUME, 99, X};
+static const uint8_t PK2_HTRAP[] = {K(50, 110, 90, 60, 75, 95, 40, 110, 35, 95, 45, 92, 110, 12, 50), P_VOLUME, 88, X};
+static const uint8_t PK2_HAZE[] = {K(52, 55, 60, 50, 56, 40, 50, 50, 50, 35, 50, 45, 45, 22, 45), P_CUTOFF, 80, P_RESO, 15, P_VOLUME, 101, X};
+#undef K
+#define AK2(kt, kd, st, sd, tt, td, ht, cd, od, rt, rd, ct, cdd) P_TYPE, T_DRUMS, P_KIT_SRC, 1, P_K_TUNE, kt, P_K_DECAY, kd, P_S_TUNE, st, P_S_DECAY, sd, \
+    P_C_TONE, tt, P_C_DECAY, td, P_R_TUNE, tt, P_R_DECAY, td, P_H_TUNE, ht, P_CH_DECAY, cd, P_OH_DECAY, od, P_SN_TONE, rt, P_SN_DECAY, rd, P_P_TUNE, ct, P_P_DECAY, cdd, \
+    P_DL_KICK, 100, P_DL_SNARE, 100, P_DL_CLAP, 100, P_DL_CH, 100, P_DL_OH, 100, P_DL_RIM, 100, P_DL_SNAP, 100, P_DL_PERC, 100, P_CUTOFF, 127, P_RESO, 0
+static const uint8_t PK2_ROCK[] = {AK2(60, 127, 62, 127, 60, 127, 64, 127, 127, 64, 127, 64, 127), P_VOLUME, 108, P_DL_KICK, 127, P_DL_SNARE, 127, P_DL_CLAP, 127, P_DL_CH, 127, P_DL_OH, 127, P_DL_RIM, 127, P_DL_SNAP, 127, P_DL_PERC, 127, X};
+static const uint8_t PK2_BREAK[] = {AK2(70, 90, 72, 95, 72, 90, 68, 95, 100, 66, 110, 66, 110), P_CUTOFF, 112, P_VOLUME, 114, P_DL_KICK, 127, P_DL_SNARE, 127, P_DL_CLAP, 127, P_DL_CH, 127, P_DL_OH, 127, P_DL_RIM, 127, P_DL_SNAP, 127, P_DL_PERC, 127, X};
+static const uint8_t PK2_JAZZ[] = {AK2(72, 70, 74, 70, 74, 80, 70, 110, 110, 70, 127, 70, 127), P_CUTOFF, 100, P_VOLUME, 118, P_DL_KICK, 127, P_DL_SNARE, 127, P_DL_CLAP, 127, P_DL_CH, 127, P_DL_OH, 127, P_DL_RIM, 127, P_DL_SNAP, 127, P_DL_PERC, 127, X};
+static const uint8_t PK2_NYTIGHT[] = {AK2(68, 80, 70, 84, 70, 82, 68, 80, 74, 66, 96, 66, 96), P_KIT_SRC, 2, P_VOLUME, 100, X};
+#undef AK2
+static const factory_t FACT_DRUMS2[] = {
+    {"HOUSE KIT", PK2_HOUSE}, {"TECHNO KIT", PK2_TECHNO}, {"ELECTRO", PK2_ELECTRO}, {"MINIMAL", PK2_MINIMAL},
+    {"DUB KIT", PK2_DUB}, {"INDUS KIT", PK2_INDUS}, {"SOFT KIT", PK2_SOFT}, {"PHONK KIT", PK2_PHONK},
+    {"2STEP KIT", PK2_2STEP}, {"DISCO KIT", PK2_DISCO}, {"HARD TRAP", PK2_HTRAP}, {"HAZE KIT", PK2_HAZE},
+    {"ROCK KIT", PK2_ROCK}, {"BREAK KIT", PK2_BREAK}, {"JAZZ KIT", PK2_JAZZ}, {"NY TIGHT", PK2_NYTIGHT},
+};
+#define B8(pu, pt, cl, to, dr, ad) P_TYPE, T_BASS, P_B_PUNCH, pu, P_B_PTIME, pt, P_B_CLICK, cl, P_B_TONE, to, P_B_DRIVE, dr, P_AD, ad, P_GLIDE, 30
+static const uint8_t PB2_SUB[] = {B8(20, 30, 0, 0, 0, 110), P_B_SUB, 60, P_VOLUME, 96, X};
+static const uint8_t PB2_ROUND[] = {B8(45, 35, 15, 15, 20, 100), P_VOLUME, 89, X};
+static const uint8_t PB2_BOOMY[] = {B8(70, 55, 20, 20, 40, 115), P_VOLUME, 108, X};
+static const uint8_t PB2_KNOCK[] = {B8(110, 25, 80, 45, 30, 70), P_VOLUME, 127, X};
+static const uint8_t PB2_FUZZ[] = {B8(60, 35, 30, 55, 45, 95), P_B_DTYPE, BD_FOLD, P_VOLUME, 127, P_CUTOFF, 127, X};
+static const uint8_t PB2_TAPE[] = {B8(50, 40, 20, 30, 60, 100), P_B_DTYPE, BD_SOFT, P_CUTOFF, 80, P_VOLUME, 127, X};
+static const uint8_t PB2_DRILL[] = {B8(75, 35, 40, 40, 50, 100), P_B_SLIDE, BS_ALWAYS, P_GLIDE, 60, P_VOLUME, 121, X};
+static const uint8_t PB2_PLUCK[] = {B8(60, 30, 30, 30, 20, 45), P_VOLUME, 127, P_AD, 62, P_B_DRIVE, 35, X};
+static const uint8_t PB2_WARM[] = {B8(35, 40, 10, 10, 15, 105), P_B_SUB, 40, P_CUTOFF, 85, P_VOLUME, 85, X};
+static const uint8_t PB2_CLIP[] = {B8(80, 30, 40, 40, 60, 90), P_B_DTYPE, BD_HARD, P_VOLUME, 127, X};
+static const uint8_t PB2_GATED[] = {B8(55, 35, 20, 20, 25, 127), P_B_GATE, BG_GATE, P_AR, 20, P_VOLUME, 91, X};
+static const uint8_t PB2_DIRTY[] = {B8(50, 40, 20, 20, 50, 100), P_B_DTYPE, BD_SOFT, P_B_SUB, 50, P_CUTOFF, 75, P_VOLUME, 127, X};
+static const uint8_t PB2_BRIGHT[] = {B8(65, 30, 50, 80, 40, 90), P_VOLUME, 112, X};
+static const uint8_t PB2_SLIDE[] = {B8(30, 40, 10, 10, 10, 110), P_B_SLIDE, BS_ALWAYS, P_GLIDE, 80, P_VOLUME, 84, X};
+static const uint8_t PB2_HARD[] = {B8(120, 25, 70, 50, 45, 85), P_B_DTYPE, BD_HARD, P_VOLUME, 127, X};
+static const uint8_t PB2_MELLOW[] = {B8(30, 35, 5, 10, 5, 100), P_CUTOFF, 70, P_VOLUME, 90, X};
+#undef B8
+static const factory_t FACT_BASS2[] = {
+    {"SUB ONLY", PB2_SUB}, {"ROUND 808", PB2_ROUND}, {"BOOMY 808", PB2_BOOMY}, {"KNOCK 808", PB2_KNOCK},
+    {"FUZZ 808", PB2_FUZZ}, {"TAPE 808", PB2_TAPE}, {"DRILL 808", PB2_DRILL}, {"PLUCK SUB", PB2_PLUCK},
+    {"WARM SUB", PB2_WARM}, {"CLIPPED", PB2_CLIP}, {"GATED 808", PB2_GATED}, {"DIRTY SUB", PB2_DIRTY},
+    {"BRIGHT 808", PB2_BRIGHT}, {"SLIDE SUB", PB2_SLIDE}, {"HARD 808", PB2_HARD}, {"MELLOW 808", PB2_MELLOW},
+};
+static const uint8_t PF2_SUPERLD[] = {P_MODE, M_UNISON, P_UNI_N, 6, P_UNI_DET, 60, P_O1_WAVE, W_SAW, P_O2_WAVE, W_SAW, P_CUTOFF, 100, P_RESO, 10, P_FENV_AMT, 70,
+    P_AA, 1, P_AS, 110, P_AR, 40, P_GLIDE, 10, P_VOLUME, 68, X};
+static const uint8_t PF2_TPLUCK[] = {P_O1_WAVE, W_SAW, P_O2_WAVE, W_SAW, P_O2_FINE, 76, P_RESO, 20, P_FENV_AMT, 120, P_FD, 50, P_FS, 0,
+    P_AA, 0, P_AD, 60, P_AR, 50, P_SPREAD, 100, P_VOLUME, 127, P_CUTOFF, 62, P_FS, 25, P_AS, 35, X};
+static const uint8_t PF2_WIDE[] = {P_MODE, M_UNISON, P_UNI_N, 4, P_UNI_DET, 50, P_O1_WAVE, W_SAW, P_O2_WAVE, W_SAW, P_CUTOFF, 70, P_FENV_AMT, 100, P_FA, 30, P_FD, 70, P_FS, 60,
+    P_AA, 5, P_AS, 110, P_AR, 60, P_VOLUME, 67, X};
+static const uint8_t PF2_REESE[] = {P_MODE, M_MONO, P_O1_WAVE, W_SAW, P_O2_WAVE, W_SAW, P_O2_FINE, 82, P_CUTOFF, 50, P_RESO, 15, P_DRIVE, 40, P_FENV_AMT, 64,
+    P_AA, 1, P_AS, 127, P_AR, 30, P_GLIDE, 15, P_VOLUME, 95, X};
+static const uint8_t PF2_VELVET[] = {P_O1_WAVE, W_PLS, P_O1_PW, 40, P_O2_WAVE, W_SAW, P_O2_FINE, 72, P_LFO_PWM, 30, P_LFO_RATE, 40, P_CUTOFF, 55, P_FENV_AMT, 80,
+    P_FA, 100, P_FD, 100, P_FS, 60, P_AA, 90, P_AS, 120, P_AR, 110, P_SPREAD, 110, P_VOLUME, 76, X};
+static const uint8_t PF2_SWELL[] = {P_O1_WAVE, W_SAW, P_O2_WAVE, W_SAW, P_O2_FINE, 68, P_CUTOFF, 45, P_FENV_AMT, 110, P_FA, 60, P_FD, 90, P_FS, 70,
+    P_AA, 40, P_AS, 110, P_AR, 50, P_VOLUME, 88, X};
+static const uint8_t PF2_KEYS[] = {P_O1_WAVE, W_SAW, P_O2_WAVE, W_PLS, P_O2_SEMI, 36, P_CUTOFF, 60, P_FENV_AMT, 90, P_FD, 70, P_FS, 30,
+    P_AA, 1, P_AD, 85, P_AS, 50, P_AR, 55, P_VOLUME, 100, X};
+static const uint8_t PF2_TSTAB[] = {P_O1_WAVE, W_SAW, P_O2_WAVE, W_SAW, P_O2_SEMI, 31, P_RESO, 40, P_FENV_AMT, 110, P_FD, 45, P_FS, 0,
+    P_AA, 0, P_AS, 0, P_AR, 30, P_DRIVE, 30, P_VOLUME, 127, P_CUTOFF, 72, P_AD, 70, X};
+static const factory_t FACT_SYNTH2[] = {
+    {"SUPER LEAD", PF2_SUPERLD}, {"TRANCE PLK", PF2_TPLUCK}, {"WIDE CHORD", PF2_WIDE}, {"DARK REESE", PF2_REESE},
+    {"VELVET PAD", PF2_VELVET}, {"BRASS SWLL", PF2_SWELL}, {"POLY KEYS", PF2_KEYS}, {"TECH STAB", PF2_TSTAB},
+};
+/* DX's own, written as 4 operators (MEL's way) and made DX voices: the algorithms and ratio indices of FACT_MEL */
+#define OPS(r1, l1, a1, d1, r2, l2, a2, d2, r3, l3, a3, d3, r4, l4, a4, d4) \
+    P_OP1_RATIO, r1, P_OP1_LVL, l1, P_OP1_ATT, a1, P_OP1_DEC, d1, P_OP2_RATIO, r2, P_OP2_LVL, l2, P_OP2_ATT, a2, P_OP2_DEC, d2, \
+    P_OP3_RATIO, r3, P_OP3_LVL, l3, P_OP3_ATT, a3, P_OP3_DEC, d3, P_OP4_RATIO, r4, P_OP4_LVL, l4, P_OP4_ATT, a4, P_OP4_DEC, d4
+static const uint8_t PD2_FMPNO[] = {P_ALGO, 4, OPS(3, 100, 0, 105, 3, 45, 0, 70, 3, 90, 0, 100, 22, 40, 0, 60), P_FB, 20, P_AA, 0, P_AD, 100, P_AS, 10, P_AR, 65, P_VOLUME, 108, X};
+static const uint8_t PD2_TINE[] = {P_ALGO, 4, OPS(3, 100, 0, 110, 22, 40, 0, 55, 3, 85, 0, 105, 3, 55, 0, 80), P_FB, 25, P_AA, 0, P_AD, 105, P_AS, 15, P_AR, 70, P_VOLUME, 103, X};
+static const uint8_t PD2_CHIME[] = {P_ALGO, 2, OPS(3, 100, 0, 100, 15, 50, 0, 65, 10, 45, 0, 80, 22, 40, 0, 55), P_AA, 0, P_AD, 100, P_AS, 0, P_AR, 95, P_VOLUME, 127, P_DX_GAIN, 19, X};
+static const uint8_t PD2_TUBE[] = {P_ALGO, 4, OPS(3, 100, 0, 115, 11, 50, 0, 95, 6, 80, 0, 110, 18, 40, 0, 85), P_AA, 0, P_AD, 110, P_AS, 0, P_AR, 100, P_VOLUME, 120, X};
+static const uint8_t PD2_PBASS[] = {P_ALGO, 0, OPS(3, 100, 0, 90, 3, 70, 0, 60, 6, 40, 0, 50, 3, 0, 0, 127), P_MODE, M_MONO, P_AA, 0, P_AD, 80, P_AS, 60, P_AR, 30, P_VOLUME, 127, P_DX_GAIN, 109, X};
+static const uint8_t PD2_PICK[] = {P_ALGO, 1, OPS(3, 100, 0, 85, 1, 60, 0, 55, 6, 35, 0, 40, 3, 0, 0, 127), P_AA, 0, P_AD, 75, P_AS, 30, P_AR, 30, P_VOLUME, 127, P_DX_GAIN, 55, X};
+static const uint8_t PD2_BRASS[] = {P_ALGO, 1, OPS(3, 100, 15, 127, 3, 75, 20, 95, 3, 60, 25, 90, 6, 20, 10, 100), P_FB, 30, P_AA, 15, P_AD, 90, P_AS, 85, P_AR, 45, P_VOLUME, 127, P_DX_GAIN, 6, X};
+static const uint8_t PD2_HORN[] = {P_ALGO, 0, OPS(3, 100, 5, 110, 3, 80, 10, 80, 3, 40, 0, 70, 3, 0, 0, 127), P_FB, 20, P_AA, 5, P_AD, 80, P_AS, 60, P_AR, 35, P_VOLUME, 127, P_DX_GAIN, 7, X};
+static const uint8_t PD2_PORGAN[] = {P_ALGO, 7, OPS(3, 100, 0, 127, 6, 80, 0, 127, 8, 60, 0, 60, 10, 40, 0, 127), P_AA, 1, P_AD, 90, P_AS, 127, P_AR, 15, P_VOLUME, 104, X};
+static const uint8_t PD2_WOOD[] = {P_ALGO, 2, OPS(3, 100, 0, 80, 10, 50, 0, 40, 6, 40, 0, 50, 18, 25, 0, 35), P_AA, 0, P_AD, 70, P_AS, 0, P_AR, 55, P_VOLUME, 116, P_DX_GAIN, 123, X};
+static const uint8_t PD2_CRYSTAL[] = {P_ALGO, 3, OPS(3, 100, 0, 95, 12, 40, 0, 60, 18, 30, 0, 50, 22, 25, 0, 45), P_AA, 0, P_AD, 90, P_AS, 0, P_AR, 85, P_VOLUME, 127, P_DX_GAIN, 43, X};
+static const uint8_t PD2_PAD[] = {P_ALGO, 5, OPS(3, 90, 60, 127, 6, 55, 70, 127, 3, 60, 60, 127, 1, 25, 60, 127), P_AA, 85, P_AD, 100, P_AS, 120, P_AR, 100, P_LFO_PITCH, 5, P_LFO_RATE, 60, P_VOLUME, 101, X};
+#undef OPS
+static const factory_t FACT_DX2[] = {
+    {"FM PIANO", PD2_FMPNO}, {"TINE FM", PD2_TINE}, {"CHIME", PD2_CHIME}, {"TUBULAR", PD2_TUBE},
+    {"PUNCH BASS", PD2_PBASS}, {"PICK BASS", PD2_PICK}, {"FM BRASS", PD2_BRASS}, {"HORN STAB", PD2_HORN},
+    {"PERC ORGAN", PD2_PORGAN}, {"WOOD KEYS", PD2_WOOD}, {"CRYSTAL", PD2_CRYSTAL}, {"FM PAD", PD2_PAD},
+};
+#define WT(tb, pos, penv, pa, pd, lfo, o2, semi, det, sub) P_TYPE, T_WT, P_WT_TABLE, tb, P_WT_POS, pos, P_WT_PENV, penv, P_WT_PATT, pa, \
+    P_WT_PDEC, pd, P_WT_LFO, lfo, P_WT_O2, o2, P_WT_SEMI, semi, P_WT_DET, det, P_WT_SUB, sub
+static const uint8_t PW2_WARM[] = {WT(0, 40, 80, 90, 127, 20, 100, 12, 35, 0), P_AA, 80, P_AD, 100, P_AS, 127, P_AR, 100, P_CUTOFF, 90, P_VOLUME, 69, X};
+static const uint8_t PW2_EVOLVE[] = {WT(7, 10, 127, 110, 127, 40, 90, 19, 30, 0), P_AA, 90, P_AD, 100, P_AS, 127, P_AR, 110, P_CUTOFF, 100, P_LFO_RATE, 30, P_VOLUME, 79, X};
+static const uint8_t PW2_AIR[] = {WT(2, 60, 70, 100, 127, 30, 80, 19, 25, 0), P_AA, 95, P_AD, 100, P_AS, 127, P_AR, 110, P_CUTOFF, 110, P_VOLUME, 100, X};
+static const uint8_t PW2_SUPER[] = {WT(0, 0, 64, 0, 127, 0, 120, 12, 90, 0), P_AA, 5, P_AD, 100, P_AS, 120, P_AR, 60, P_CUTOFF, 115, P_VOLUME, 65, X};
+static const uint8_t PW2_PLUCK[] = {WT(4, 20, 110, 0, 50, 0, 60, 12, 20, 0), P_AA, 0, P_AR, 50, P_CUTOFF, 105, P_VOLUME, 127, P_AS, 30, P_AD, 80, X};
+static const uint8_t PW2_GLASS[] = {WT(6, 30, 100, 0, 70, 0, 50, 19, 10, 0), P_AA, 0, P_AD, 85, P_AS, 20, P_AR, 70, P_VOLUME, 127, X};
+static const uint8_t PW2_VOX[] = {WT(2, 50, 90, 20, 90, 20, 0, 12, 0, 40), P_MODE, M_MONO, P_GLIDE, 20, P_AA, 2, P_AD, 90, P_AS, 110, P_AR, 40, P_VOLUME, 127, X};
+static const uint8_t PW2_SCREAM[] = {WT(4, 70, 120, 0, 60, 10, 80, 12, 40, 0), P_MODE, M_MONO, P_GLIDE, 15, P_AA, 0, P_AD, 90, P_AS, 110, P_AR, 40, P_CUTOFF, 115, P_RESO, 20, P_VOLUME, 119, X};
+static const uint8_t PW2_REESE[] = {WT(0, 30, 64, 0, 127, 0, 127, 12, 70, 80), P_MODE, M_MONO, P_AA, 0, P_AD, 100, P_AS, 120, P_AR, 30, P_CUTOFF, 70, P_RESO, 15, P_VOLUME, 77, X};
+static const uint8_t PW2_WOBBLE[] = {WT(5, 20, 64, 0, 127, 80, 0, 12, 0, 100), P_MODE, M_MONO, P_LFO_RATE, 70, P_AA, 0, P_AD, 100, P_AS, 120, P_AR, 30, P_CUTOFF, 90, P_VOLUME, 88, X};
+static const uint8_t PW2_DIGI[] = {WT(1, 50, 100, 0, 50, 0, 0, 12, 0, 90), P_MODE, M_MONO, P_AA, 0, P_AD, 70, P_AS, 60, P_AR, 20, P_CUTOFF, 85, P_VOLUME, 127, X};
+static const uint8_t PW2_WHEEL[] = {WT(3, 100, 64, 0, 127, 0, 0, 12, 0, 60), P_AA, 1, P_AD, 90, P_AS, 127, P_AR, 15, P_VOLUME, 97, X};
+static const uint8_t PW2_BPAD[] = {WT(6, 60, 80, 60, 127, 25, 70, 19, 20, 0), P_AA, 60, P_AD, 100, P_AS, 127, P_AR, 110, P_VOLUME, 98, X};
+static const uint8_t PW2_DRONE[] = {WT(7, 0, 127, 127, 127, 50, 100, 0, 15, 60), P_AA, 110, P_AD, 100, P_AS, 127, P_AR, 120, P_CUTOFF, 70, P_VOLUME, 89, X};
+static const uint8_t PW2_CHIP[] = {WT(1, 100, 64, 0, 127, 0, 0, 12, 0, 0), P_MODE, M_MONO, P_AA, 0, P_AD, 90, P_AS, 120, P_AR, 20, P_LFO_PITCH, 4, P_LFO_DELAY, 60, P_VOLUME, 127, X};
+static const uint8_t PW2_FMSTAB[] = {WT(5, 60, 110, 0, 40, 0, 90, 19, 10, 0), P_AA, 0, P_AR, 40, P_VOLUME, 127, P_AS, 25, P_AD, 70, X};
+static const uint8_t PW_INIT[] = {WT(0, 0, 64, 0, 127, 0, 0, 12, 0, 0), P_AA, 2, P_AD, 90, P_AS, 110, P_AR, 40, P_CUTOFF, 127, P_RESO, 0, P_FENV_AMT, 64, X};
+#undef WT
+static const factory_t FACT_WT2[] = {
+    {"WARM PAD", PW2_WARM}, {"EVOLVE", PW2_EVOLVE}, {"AIR PAD", PW2_AIR}, {"SUPER WAVE", PW2_SUPER},
+    {"WT PLUCK", PW2_PLUCK}, {"GLASS KEYS", PW2_GLASS}, {"VOX LEAD", PW2_VOX}, {"SYNC SCRM", PW2_SCREAM},
+    {"WT REESE", PW2_REESE}, {"WOBBLE", PW2_WOBBLE}, {"DIGI BASS", PW2_DIGI}, {"TONEWHEEL", PW2_WHEEL},
+    {"BELL PAD", PW2_BPAD}, {"DARK DRONE", PW2_DRONE}, {"CHIP LEAD", PW2_CHIP}, {"FM STAB", PW2_FMSTAB},
+};
+static const factory_t FACT_WT_INIT = {"INIT WT", PW_INIT};
+#define ST2(a, r, c, s16, s8, s4, ens) P_TYPE, T_STR, P_AA, a, P_AS, 127, P_AD, 100, P_AR, r, P_CUTOFF, c, P_RESO, 0, P_FENV_AMT, 64, P_ST_16, s16, P_ST_8, s8, P_ST_4, s4, P_ST_ENS, ens
+static const uint8_t PT2_OCT[] = {ST2(82, 94, 110, 90, 110, 110, 110), P_VOLUME, 89, X};
+static const uint8_t PT2_WARM[] = {ST2(88, 100, 92, 60, 120, 40, 120), P_VOLUME, 101, X};
+static const uint8_t PT2_BRIGHT[] = {ST2(70, 90, 124, 30, 110, 120, 115), P_VOLUME, 93, X};
+static const uint8_t PT2_VIOLA[] = {ST2(76, 88, 104, 0, 120, 60, 95), P_LFO_PITCH, 5, P_LFO_RATE, 70, P_LFO_DELAY, 50, P_VOLUME, 102, X};
+static const uint8_t PT2_LOW[] = {ST2(78, 90, 80, 127, 40, 0, 80), P_VOLUME, 124, X};
+static const uint8_t PT2_PIZZ[] = {ST2(0, 50, 110, 0, 110, 50, 60), P_VOLUME, 127, P_AD, 76, P_AS, 25, P_ST_4, 90, X};
+static const uint8_t PT2_TREM[] = {ST2(70, 90, 106, 40, 110, 60, 100), P_LFO_AMP, 60, P_LFO_RATE, 95, P_VOLUME, 115, X};
+static const uint8_t PT2_SWELL[] = {ST2(110, 110, 100, 70, 110, 70, 127), P_VOLUME, 124, X};
+static const uint8_t PT2_POP[] = {ST2(10, 70, 120, 80, 110, 100, 90), P_AD, 70, P_AS, 60, P_VOLUME, 127, X};
+static const uint8_t PT2_SOFT[] = {ST2(95, 105, 84, 40, 100, 20, 127), P_VOLUME, 112, X};
+static const uint8_t PT2_AIRY[] = {ST2(85, 100, 118, 0, 70, 127, 120), P_VOLUME, 95, X};
+static const uint8_t PT2_DUSTY[] = {ST2(80, 96, 70, 50, 110, 50, 100), P_RESO, 15, P_LFO_PITCH, 3, P_LFO_RATE, 30, P_VOLUME, 99, X};
+#undef ST2
+static const factory_t FACT_STR2[] = {
+    {"OCTAVES", PT2_OCT}, {"WARM ENS", PT2_WARM}, {"BRIGHT ENS", PT2_BRIGHT}, {"VIOLAS", PT2_VIOLA},
+    {"LOW STR", PT2_LOW}, {"PIZZ STR", PT2_PIZZ}, {"TREM STR", PT2_TREM}, {"SWELL STR", PT2_SWELL},
+    {"POP STAB", PT2_POP}, {"SOFT ENS", PT2_SOFT}, {"AIRY STR", PT2_AIRY}, {"DUSTY STR", PT2_DUSTY},
+};
+static const uint8_t PE2_BRIGHT[] = {EP2(0, 90, 70, 80, 82), P_EP_DRIVE, 20, P_VOLUME, 80, X};
+static const uint8_t PE2_DARK[] = {EP2(0, 40, 30, 30, 90), P_CUTOFF, 100, P_VOLUME, 90, X};
+static const uint8_t PE2_TREM[] = {EP2(0, 60, 50, 45, 86), P_EP_TREM, 90, P_EP_RATE, 60, P_EP_STEREO, 0, P_VOLUME, 97, X};
+static const uint8_t PE2_LOFI[] = {EP2(0, 55, 40, 40, 80), P_EP_DRIVE, 30, P_CUTOFF, 88, P_LFO_PITCH, 4, P_LFO_RATE, 30, P_VOLUME, 91, X};
+static const uint8_t PE2_BALLAD[] = {EP2(0, 50, 35, 55, 95), P_EP_TREM, 40, P_EP_RATE, 40, P_VOLUME, 97, X};
+static const uint8_t PE2_SOFTR[] = {EP2(1, 45, 30, 40, 66), P_EP_NOISE, 30, P_VOLUME, 91, X};
+static const uint8_t PE2_BITER[] = {EP2(1, 80, 100, 100, 62), P_EP_DRIVE, 60, P_VOLUME, 74, X};
+static const uint8_t PE2_BITEC[] = {CV2(1, 100, 40, 66, 0, 40, 60, 80), P_VOLUME, 111, X};
+static const uint8_t PE2_MWAH[] = {CV2(2, 70, 90, 50, 80, 100, 80, 70), P_VOLUME, 102, X};
+static const factory_t FACT_EP2[] = {
+    {"BRITE TINE", PE2_BRIGHT}, {"DARK TINE", PE2_DARK}, {"TREM TINE", PE2_TREM}, {"LOFI TINE", PE2_LOFI},
+    {"BALLAD EP", PE2_BALLAD}, {"SOFT REED", PE2_SOFTR}, {"BITE REED", PE2_BITER}, {"BITE CLAV", PE2_BITEC}, {"MUTE WAH", PE2_MWAH},
+};
+static const uint8_t PI2_9[] = {MI2(8), X}, PI2_10[] = {MI2(9), X}, PI2_11[] = {MI2(10), X}, PI2_12[] = {MI2(11), X},
+                     PI2_13[] = {MI2(12), X}, PI2_14[] = {MI2(13), X}, PI2_15[] = {MI2(14), X}, PI2_16[] = {MI2(15), X};
+static const factory_t FACT_MIDI2[] = {{"MIDI CH 9", PI2_9}, {"MIDI CH 10", PI2_10}, {"MIDI CH 11", PI2_11}, {"MIDI CH 12", PI2_12},
+                                       {"MIDI CH 13", PI2_13}, {"MIDI CH 14", PI2_14}, {"MIDI CH 15", PI2_15}, {"MIDI CH 16", PI2_16}};
+#undef X
+#undef EP2
+#undef CV2
+#undef MI2
+/* (0.41) each bank's factory sounds, in order (then its INIT slots up to 128). DX's bank starts with MEL's 16 (made DX
+ * voices) and the DX7 voices of bm_dxbank.h – o3_core.h's prog_factory – then FACT_DX2 (MEL-style, made DX voices too) */
+typedef struct { const factory_t *f; uint32_t n; } fseg_t;
+#define SEG(a) {a, sizeof a / sizeof a[0]}
+static const fseg_t BANK_SEG[NBANK][4] = {
+    [BK_DRUMS] = {SEG(FACT_DRUMS), SEG(FACT_DRUMS2)},
+    [BK_BASS] = {SEG(FACT_BASS), SEG(FACT_BASS2)},
+    [BK_SYNTH] = {SEG(FACTORY), SEG(FACT_SYNTH2)},
+    [BK_DX] = {SEG(FACT_DX2)},
+    [BK_WT] = {SEG(FACT_WT), SEG(FACT_WT2)},
+    [BK_STR] = {SEG(FACT_STR), SEG(FACT_STR2)},
+    [BK_GP] = {SEG(FACT_GP)},
+    [BK_EP] = {SEG(FACT_EP), SEG(FACT_CV), SEG(FACT_EP2)},
+    [BK_SMP] = {SEG(FACT_SMP)},
+    [BK_MIDI] = {SEG(FACT_MIDI), SEG(FACT_MIDI2)},
+    [BK_MEL] = {SEG(FACT_MEL)},
+};
+#undef SEG
+static const factory_t *const BANK_INIT[NBANK] = {&FACT_DRUMS_INIT, &FACT_BASS_INIT, &FACT_SYNTH_INIT, &FACT_DX_INIT, &FACT_WT_INIT, &FACT_STR_INIT,
+                                                  &FACT_GP[0], &FACT_EP[0], &FACT_SMP_INIT, &FACT_MIDI[0], &FACT_MEL_INIT};
+static const factory_t *bank_factory(uint32_t b, uint32_t s)   /* slot s of bank b: its factory sound, 0 = an INIT slot */
 {
-    n %= NPROG;
-    if (n < PROG_BASS0) return n < NFACT_DRUMS ? &FACT_DRUMS[n] : &FACT_DRUMS_INIT;
-    if (n < PROG_MEL0) return n - PROG_BASS0 < NFACT_BASS ? &FACT_BASS[n - PROG_BASS0] : &FACT_BASS_INIT;
-    if (n < PROG_SYNTH0) return n - PROG_MEL0 < NFACT_MEL ? &FACT_MEL[n - PROG_MEL0] : &FACT_MEL_INIT;
-    if (n >= PROG_EP0) return &FACT_EP[(n - PROG_EP0) % NFACT_EP];
-    if (n >= PROG_MIDI0) return &FACT_MIDI[(n - PROG_MIDI0) % NFACT_MIDI];
-    if (n >= PROG_SMP0) return n - PROG_SMP0 < NFACT_SMP ? &FACT_SMP[n - PROG_SMP0] : &FACT_SMP_INIT;
-    if (n >= PROG_STR0) return n - PROG_STR0 < NFACT_STR ? &FACT_STR[n - PROG_STR0] : &FACT_STR_INIT;
-    if (n >= PROG_DX0) return &FACT_DX_INIT;    /* (its voice and name: prog_get, from bm_dxbank.h) */
-    return n - PROG_SYNTH0 < NFACT_SYNTH ? &FACTORY[n - PROG_SYNTH0] : &FACT_SYNTH_INIT;
+    for (uint32_t k = 0; k < 4u && BANK_SEG[b][k].f; k++) { if (s < BANK_SEG[b][k].n) return &BANK_SEG[b][k].f[s]; s -= BANK_SEG[b][k].n; }
+    return 0;
 }

@@ -91,14 +91,12 @@ static void mixer_turn(int k, int e)
     }
     mix_apply(); set_touch();
 }
-static void mixer_pad(uint32_t p, int shift_held)   /* rows 2-3: mute (SHIFT: solo), row 4: the track */
+static void mixer_pad(uint32_t p, int shift_held)   /* (0.41, fixed) rows 3-4: mute A-D, E-H (SHIFT: solo) */
 {
-    uint32_t t = col_trk(p % 4u), r = p / 4u;
-    if (t >= NTRK) return;
-    if (r == 1u || r == 2u) {
-        if (shift_held) set.mix_solo ^= (uint8_t)(1u << t); else set.mix_mute ^= (uint8_t)(1u << t);
-        mix_apply(); set_touch();
-    } else if (r == 3u) sel = t;
+    uint32_t t = p - 8u;
+    if (p < 8u || t >= NTRK) return;
+    if (shift_held) set.mix_solo ^= (uint8_t)(1u << t); else set.mix_mute ^= (uint8_t)(1u << t);
+    mix_apply(); set_touch();
 }
 
 static void meters_take(void)                   /* the tracks' peaks: up at once, down ~2 px per 30 ms (0..44, square law) */
@@ -191,16 +189,14 @@ static void mixer_view(void)
         vg_round(x + 80, 236, 26, 26, 4, so ? 0xFFE14D : CELL2); vg_text("S", x + 93, 241, VG_MED, so ? 0x000000 : DIM, VG_CENTER);
     }
 }
-static void mixer_leds(void)                    /* row 1 start/stop, rows 2-3 mute / solo, row 4 the tracks */
+static void trk_led(uint32_t t, int p);
+static void mixer_leds(void)                    /* (0.41, fixed) rows 1-2 start / stop A-D, E-H · rows 3-4 mute / solo A-D, E-H */
 {
-    for (uint32_t c = 0; c < 4u; c++) {
-        uint32_t t = col_trk(c);
-        if (t >= NTRK) { for (uint32_t r = 0; r < 4u; r++) vibe_led_pad((int)(4u * r + c), 0, 0); continue; }
-        uint32_t mu = set.mix_mute >> t & 1u, so = set.mix_solo >> t & 1u;
-        vibe_led_pad((int)c, GREEN, ctl_trk_on >> t & 1u ? 1.0f : 0.15f);
-        vibe_led_pad((int)(4u + c), so ? 0xFFE14D : RED, mu || so ? 1.0f : 0.12f);
-        vibe_led_pad((int)(8u + c), so ? 0xFFE14D : RED, mu || so ? 1.0f : 0.12f);
-        vibe_led_pad((int)(12u + c), TRK_RGB[t], t == sel ? 1.0f : 0.25f);
+    for (uint32_t t = 0; t < 8u; t++) {
+        trk_led(t, (int)t);
+        if (t >= NTRK) { vibe_led_pad((int)(8u + t), 0, 0); continue; }
+        { uint32_t mu = set.mix_mute >> t & 1u, so = set.mix_solo >> t & 1u;
+          vibe_led_pad((int)(8u + t), so ? 0xFFE14D : RED, mu || so ? 1.0f : 0.12f); }
     }
 }
 
@@ -208,8 +204,9 @@ static void mixer_leds(void)                    /* row 1 start/stop, rows 2-3 mu
 static uint32_t reset_ask;
 static void reset_all(void)
 {
-    static const char *const F[] = {"settings", "plob0", "plob1", "plob2", "plob3", "takes"};
+    static const char *const F[] = {"settings", "plob0", "plob1", "plob2", "plob3", "plob4", "takes"};   /* (0.41: plob4) */
     for (unsigned i = 0; i < sizeof F / sizeof F[0]; i++) vibe_store_delete(F[i]);
+    for (uint32_t b = 0; b < NPSECT; b++) vibe_store_delete(ps_file(b));   /* (0.41: the banks) */
     for (uint32_t n = 0; n < NPAT; n++) { vibe_store_delete(PB_FILE_N(n)); vibe_store_delete(PS_FILE_N(n)); vibe_store_delete(pat_fname("paud", n)); }   /* (3.7: 64 patterns, their audio) */
     vibe_store_delete("takes2");
     vibe_request(VIBE_REQ_RESTART);

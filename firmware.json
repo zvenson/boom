@@ -1,10 +1,10 @@
 {
   "name": "BOOM FM",
-  "version": "0.40",
+  "version": "0.41",
   "author": "zvenson",
-  "memory_mb": 320,
+  "memory_mb": 384,
   "memory_whole": true,
-  "description": "Mini DAW on the VIBE: 8 tracks · synth drums · playable 808 bass · 4-op FM keys · OberVave analog synth · DX7 voices (.syx) · string ensemble · electric piano (tines and reeds) · tube amp · OberVave's sequencer, mixer, FX and audio tracks – native VIBE firmware",
+  "description": "Mini DAW on the VIBE: 8 tracks · synth drums · playable 808 bass · OberVave analog synth · DX7 voices (.syx) · wavetable synth · string ensemble · sampled grand piano · electric piano (tines and reeds) · clav · tube amp · OberVave's sequencer, mixer, FX and audio tracks – native VIBE firmware",
   "license": "GPL-3.0",
   "order": 1,
   "play_keys": false
